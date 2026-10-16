@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#17191c">
+<meta name="description" content="Explore a detailed, interactive reconstruction of the Herodian Second Temple in Jerusalem, with architectural close-ups, cutaways and a guided tour.">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'">
+<title>The Second Temple · Jerusalem</title>
+<style>
+:root{color-scheme:light;--background:#f5f3ee;--foreground:#25282d;--muted:#64676b;--surface:#eae7e0;--border:#ccc8c0;--viz-series-1:#7753b3;--blue:#648ca8;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:15px;background:var(--background);color:var(--foreground)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--background:#17191c;--foreground:#f0eee9;--muted:#a6a8ac;--surface:#2b2e33;--border:#484b52;--viz-series-1:#c3a0fa}}
+:root[data-theme="dark"]{color-scheme:dark;--background:#17191c;--foreground:#f0eee9;--muted:#a6a8ac;--surface:#2b2e33;--border:#484b52;--viz-series-1:#c3a0fa}
+*{box-sizing:border-box}body{margin:0;padding:22px max(16px,env(safe-area-inset-left)) 28px}main{max-width:1500px;margin:auto}h2{font-size:24px;letter-spacing:-.6px;font-weight:650;line-height:1.2}.text-small{font-size:12px}.text-muted{color:var(--muted)}.tabular-nums{font-variant-numeric:tabular-nums}.viz-controls,.viz-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0}.btn{font:inherit;font-size:14px;font-weight:500;line-height:1.2;min-height:42px;min-width:42px;padding:10px 15px;color:var(--foreground);background:var(--surface);border:1px solid transparent;border-radius:22px;cursor:pointer;touch-action:manipulation}.btn:hover{border-color:var(--border)}.btn[aria-pressed="true"]{color:var(--background);background:var(--viz-series-1)}.btn:disabled{opacity:.35;cursor:default}:focus-visible{outline:3px solid var(--viz-series-1);outline-offset:3px}.form-label{display:flex;flex-direction:column;gap:8px;color:var(--muted);font-size:13px}.form-select{appearance:auto;font:inherit;color:var(--foreground);background:var(--surface);border:1px solid var(--border);border-radius:10px;min-height:44px;padding:8px 12px;width:100%}.form-check{display:inline-flex;align-items:center;gap:8px;min-height:44px;cursor:pointer;margin-right:8px}.form-check-input{width:20px;height:20px;accent-color:var(--viz-series-1);cursor:pointer}.form-range{width:100%;height:25px;accent-color:var(--viz-series-1);cursor:pointer}.appearance{position:absolute;right:0;top:-4px}.appearance select{color:var(--muted);font:inherit;font-size:12px;min-height:36px;padding:6px 9px;background:var(--surface);border:1px solid var(--border);border-radius:8px}footer{max-width:1500px;margin:20px auto 0;color:var(--muted);font-size:12px;line-height:1.6}a{color:var(--viz-series-1)}details summary{cursor:pointer;min-height:36px;display:list-item}footer p{max-width:1000px}.temple-stage{border-radius:4px}.temple-orientation{background:color-mix(in srgb,var(--background) 78%,transparent);padding:5px 8px;border-radius:4px}.temple-heading{min-height:35px;padding-right:140px!important}
+@media(max-width:520px){body{padding:16px 12px 24px}h2{font-size:22px}.temple-heading{padding-right:0!important}.appearance{position:static;display:block;margin:14px 0}.btn{font-size:13px;padding:10px 12px}.viz-controls{gap:6px}.temple-heading>span{max-width:275px;padding-right:0;line-height:1.4}.appearance{top:0}.temple-camera .btn{flex:1}.temple-detail{font-size:14px;line-height:1.5}.temple-stage{border-radius:2px}}
+</style>
+<script>
+// Save only this viewer's preferences locally; all assets and model data are public.
+try{const appearance=localStorage.getItem('temple-appearance');if(appearance==='light'||appearance==='dark')document.documentElement.dataset.theme=appearance;}catch(e){}
+let savedModel;try{savedModel=JSON.parse(localStorage.getItem('temple-viewer-v2')||'null');}catch(e){}
+window.openai={widgetState:savedModel,setWidgetState(value){this.widgetState=value;try{localStorage.setItem('temple-viewer-v2',JSON.stringify(value));}catch(e){}return Promise.resolve();}};
+</script>
+</head>
+<body>
+<main>
+<!--MODEL-->
+</main>
+<footer>
+<details><summary>About this reconstruction &amp; sources</summary>
+<p>The Herodian Second Temple, around 30 CE. Layout and principal spaces follow ancient descriptions; detailed decoration, landscape, colors, paving placement and people are interpretive. Dimensions use an illustrative 0.5 m cubit. The Holy of Holies is empty.</p>
+<p>Architectural references: <a href="https://penelope.uchicago.edu/josephus/war-5.html" target="_blank" rel="noopener">Josephus, Jewish War 5</a> · <a href="https://penelope.uchicago.edu/josephus/ant-15.html" target="_blank" rel="noopener">Antiquities 15</a> · <a href="https://www.sefaria.org/Mishnah_Middot" target="_blank" rel="noopener">Mishnah Middot</a> · <a href="https://image-database.nes.lsa.umich.edu/items/show/179" target="_blank" rel="noopener">Israel Museum model photograph</a> · <a href="https://tmsifting.org/en/2016/09/06/1374/" target="_blank" rel="noopener">Excavated geometric stone flooring</a>. Captured daylight: <a href="https://polyhaven.com/a/dry_meadow" target="_blank" rel="noopener">Poly Haven, Dry Meadow</a> (CC0). <a href="https://github.com/never-nude/temple" target="_blank" rel="noopener">Project on GitHub</a>.</p>
+</details>
+</footer>
+<script>
+const appearance=document.createElement('label');appearance.className='appearance';appearance.innerHTML='<select aria-label="Appearance"><option value="system">System theme</option><option value="light">Light theme</option><option value="dark">Dark theme</option></select>';document.getElementById('temple-explorer').appendChild(appearance);const themeSelect=appearance.querySelector('select');themeSelect.value=document.documentElement.dataset.theme||'system';themeSelect.addEventListener('change',()=>{const theme=themeSelect.value;if(theme==='system')delete document.documentElement.dataset.theme;else document.documentElement.dataset.theme=theme;try{localStorage.setItem('temple-appearance',theme);}catch(e){}});
+</script>
+</body>
+</html>
