@@ -2,6 +2,10 @@
 
 An interactive reconstruction of the Herodian Second Temple complex in Jerusalem, around 30 CE. The current release focuses on architectural realism and interactive exploration. AR is a later step.
 
+## Continue on another computer
+
+Read [HANDOFF.md](HANDOFF.md) for the current state, local startup steps, constraints and planned iPhone/iPad AR phase.
+
 ## Explore
 
 - Orbit, zoom, and pan with mouse or touch.
