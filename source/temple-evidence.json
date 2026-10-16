@@ -1,0 +1,526 @@
+{
+  "schemaVersion": 1,
+  "scope": "Temple building only",
+  "researchDate": "2026-10-16",
+  "sources": {
+    "middot3": {
+      "title": "Mishnah Middot, chapter 3",
+      "url": "https://www.sefaria.org/Mishnah_Middot.3",
+      "api": "https://www.sefaria.org/api/texts/Mishnah_Middot.3?context=0",
+      "kind": "ancient literary description"
+    },
+    "middot4": {
+      "title": "Mishnah Middot, chapter 4",
+      "url": "https://www.sefaria.org/Mishnah_Middot.4",
+      "api": "https://www.sefaria.org/api/texts/Mishnah_Middot.4?context=0",
+      "kind": "ancient literary description"
+    },
+    "josephusWar5": {
+      "title": "Josephus, Jewish War 5.5",
+      "url": "https://penelope.uchicago.edu/josephus/war-5.html",
+      "kind": "ancient literary description"
+    },
+    "patrich1988": {
+      "title": "Joseph Patrich, Reconstructing the Magnificent Temple Herod Built (1988), drawings by Leen Ritmeyer",
+      "url": "https://library.biblicalarchaeology.org/article/reconstructing-the-magnificent-temple-herod-built/",
+      "accessibleReferencePdf": "https://wisdomintorah.com/wp-content/uploads/2017/04/Reconstructing-the-Magnificent-Temple-Herod-Built.pdf",
+      "referencePages": {
+        "plan": 20,
+        "section": 21,
+        "cutaway": 19
+      },
+      "kind": "scholarly reconstruction"
+    },
+    "patrich2024": {
+      "title": "Joseph Patrich, The Jerusalem Temple and the Temple Mount (Mohr Siebeck, 2024), Plate I",
+      "url": "https://api.pageplace.de/preview/DT0400.9783161632709_A48657804/preview-9783161632709_A48657804.pdf",
+      "referencePdfPage": 14,
+      "kind": "scholarly reconstruction; publisher preview"
+    }
+  },
+  "basis": {
+    "dimensionSource": "Mishnah Middot 3:6-8 and 4:1-7",
+    "interpretation": "Patrich/Ritmeyer arrangement, with original procedural geometry",
+    "cubitMetres": 0.5,
+    "cubitStatus": "chosen model convention, not a precise archaeological determination",
+    "comparisonCubitMetres": 0.525,
+    "comparisonCubitSource": "Patrich 1988",
+    "coordinates": {
+      "x": "east positive",
+      "y": "up",
+      "z": "south positive",
+      "porchExteriorFaceX": -24,
+      "priestlyCourtY": 5.4
+    },
+    "drawingsReuse": "Reference only. Published plans, photographs and illustrations remain copyrighted; none are bundled as model assets."
+  },
+  "overall": {
+    "lengthEastWestMetres": 50,
+    "porchWidthNorthSouthMetres": 50,
+    "lowerBodyWidthNorthSouthMetres": 35,
+    "heightIncludingFoundationAndSpikesMetres": 50,
+    "source": "middot4:6-7"
+  },
+  "eastWestSequence": [
+    {
+      "part": "porch exterior wall",
+      "cubits": 5,
+      "metres": 2.5,
+      "source": "middot4:7",
+      "xEast": -24,
+      "xWest": -26.5
+    },
+    {
+      "part": "porch interior",
+      "cubits": 11,
+      "metres": 5.5,
+      "source": "middot4:7",
+      "xEast": -26.5,
+      "xWest": -32.0
+    },
+    {
+      "part": "heikhal entrance wall",
+      "cubits": 6,
+      "metres": 3.0,
+      "source": "middot4:7",
+      "xEast": -32.0,
+      "xWest": -35.0
+    },
+    {
+      "part": "Holy Place interior",
+      "cubits": 40,
+      "metres": 20.0,
+      "source": "middot4:7",
+      "xEast": -35.0,
+      "xWest": -55.0
+    },
+    {
+      "part": "curtain interval",
+      "cubits": 1,
+      "metres": 0.5,
+      "source": "middot4:7",
+      "xEast": -55.0,
+      "xWest": -55.5
+    },
+    {
+      "part": "Holy of Holies interior",
+      "cubits": 20,
+      "metres": 10.0,
+      "source": "middot4:7",
+      "xEast": -55.5,
+      "xWest": -65.5
+    },
+    {
+      "part": "western sacred wall",
+      "cubits": 6,
+      "metres": 3.0,
+      "source": "middot4:7",
+      "xEast": -65.5,
+      "xWest": -68.5
+    },
+    {
+      "part": "western cell",
+      "cubits": 6,
+      "metres": 3.0,
+      "source": "middot4:7",
+      "xEast": -68.5,
+      "xWest": -71.5
+    },
+    {
+      "part": "western cell exterior wall",
+      "cubits": 5,
+      "metres": 2.5,
+      "source": "middot4:7",
+      "xEast": -71.5,
+      "xWest": -74.0
+    }
+  ],
+  "northSouthSequenceAtSecondCellStorey": [
+    {
+      "part": "north exterior wall",
+      "cubits": 5,
+      "metres": 2.5,
+      "source": "middot4:7",
+      "zNorth": -17.5,
+      "zSouth": -15.0
+    },
+    {
+      "part": "north mesibbah",
+      "cubits": 3,
+      "metres": 1.5,
+      "source": "middot4:7",
+      "zNorth": -15.0,
+      "zSouth": -13.5
+    },
+    {
+      "part": "north cell wall",
+      "cubits": 5,
+      "metres": 2.5,
+      "source": "middot4:7",
+      "zNorth": -13.5,
+      "zSouth": -11.0
+    },
+    {
+      "part": "north cell",
+      "cubits": 6,
+      "metres": 3.0,
+      "source": "middot4:7",
+      "zNorth": -11.0,
+      "zSouth": -8.0
+    },
+    {
+      "part": "north sacred wall",
+      "cubits": 6,
+      "metres": 3.0,
+      "source": "middot4:7",
+      "zNorth": -8.0,
+      "zSouth": -5.0
+    },
+    {
+      "part": "sacred interior",
+      "cubits": 20,
+      "metres": 10.0,
+      "source": "middot4:7",
+      "zNorth": -5.0,
+      "zSouth": 5.0
+    },
+    {
+      "part": "south sacred wall",
+      "cubits": 6,
+      "metres": 3.0,
+      "source": "middot4:7",
+      "zNorth": 5.0,
+      "zSouth": 8.0
+    },
+    {
+      "part": "south cell",
+      "cubits": 6,
+      "metres": 3.0,
+      "source": "middot4:7",
+      "zNorth": 8.0,
+      "zSouth": 11.0
+    },
+    {
+      "part": "south cell wall",
+      "cubits": 5,
+      "metres": 2.5,
+      "source": "middot4:7",
+      "zNorth": 11.0,
+      "zSouth": 13.5
+    },
+    {
+      "part": "south water descent",
+      "cubits": 3,
+      "metres": 1.5,
+      "source": "middot4:7",
+      "zNorth": 13.5,
+      "zSouth": 15.0
+    },
+    {
+      "part": "south exterior wall",
+      "cubits": 5,
+      "metres": 2.5,
+      "source": "middot4:7",
+      "zNorth": 15.0,
+      "zSouth": 17.5
+    }
+  ],
+  "heightStackAbovePriestlyCourt": [
+    {
+      "part": "foundation",
+      "cubits": 6,
+      "metres": 3.0,
+      "source": "middot4:6",
+      "baseAbovePriestlyCourt": 0,
+      "topAbovePriestlyCourt": 3.0
+    },
+    {
+      "part": "sacred chamber",
+      "cubits": 40,
+      "metres": 20.0,
+      "source": "middot4:6",
+      "baseAbovePriestlyCourt": 3.0,
+      "topAbovePriestlyCourt": 23.0
+    },
+    {
+      "part": "first ceiling coffers",
+      "cubits": 1,
+      "metres": 0.5,
+      "source": "middot4:6",
+      "baseAbovePriestlyCourt": 23.0,
+      "topAbovePriestlyCourt": 23.5
+    },
+    {
+      "part": "first ceiling drainage layer",
+      "cubits": 2,
+      "metres": 1.0,
+      "source": "middot4:6",
+      "baseAbovePriestlyCourt": 23.5,
+      "topAbovePriestlyCourt": 24.5
+    },
+    {
+      "part": "first ceiling beams",
+      "cubits": 1,
+      "metres": 0.5,
+      "source": "middot4:6",
+      "baseAbovePriestlyCourt": 24.5,
+      "topAbovePriestlyCourt": 25.0
+    },
+    {
+      "part": "first ceiling plaster",
+      "cubits": 1,
+      "metres": 0.5,
+      "source": "middot4:6",
+      "baseAbovePriestlyCourt": 25.0,
+      "topAbovePriestlyCourt": 25.5
+    },
+    {
+      "part": "upper chamber",
+      "cubits": 40,
+      "metres": 20.0,
+      "source": "middot4:6",
+      "baseAbovePriestlyCourt": 25.5,
+      "topAbovePriestlyCourt": 45.5
+    },
+    {
+      "part": "upper ceiling coffers",
+      "cubits": 1,
+      "metres": 0.5,
+      "source": "middot4:6",
+      "baseAbovePriestlyCourt": 45.5,
+      "topAbovePriestlyCourt": 46.0
+    },
+    {
+      "part": "upper ceiling drainage layer",
+      "cubits": 2,
+      "metres": 1.0,
+      "source": "middot4:6",
+      "baseAbovePriestlyCourt": 46.0,
+      "topAbovePriestlyCourt": 47.0
+    },
+    {
+      "part": "upper ceiling beams",
+      "cubits": 1,
+      "metres": 0.5,
+      "source": "middot4:6",
+      "baseAbovePriestlyCourt": 47.0,
+      "topAbovePriestlyCourt": 47.5
+    },
+    {
+      "part": "upper ceiling plaster",
+      "cubits": 1,
+      "metres": 0.5,
+      "source": "middot4:6",
+      "baseAbovePriestlyCourt": 47.5,
+      "topAbovePriestlyCourt": 48.0
+    },
+    {
+      "part": "parapet",
+      "cubits": 3,
+      "metres": 1.5,
+      "source": "middot4:6",
+      "baseAbovePriestlyCourt": 48.0,
+      "topAbovePriestlyCourt": 49.5
+    },
+    {
+      "part": "bird spikes",
+      "cubits": 1,
+      "metres": 0.5,
+      "source": "middot4:6",
+      "baseAbovePriestlyCourt": 49.5,
+      "topAbovePriestlyCourt": 50.0
+    }
+  ],
+  "openings": {
+    "outerPorch": {
+      "widthCubits": 20,
+      "heightCubits": 40,
+      "widthMetres": 10,
+      "heightMetres": 20,
+      "source": "middot3:7",
+      "doors": false,
+      "doorlessSource": "josephusWar5, 5.5.4"
+    },
+    "innerHeikhal": {
+      "widthCubits": 10,
+      "heightCubits": 20,
+      "widthMetres": 5,
+      "heightMetres": 10,
+      "wallThicknessMetres": 3,
+      "doorLeaves": 4,
+      "arrangement": "inner and outer pairs; alternative folding leaves",
+      "source": "middot4:1"
+    },
+    "wickets": {
+      "north": "access through northeastern cell",
+      "south": "closed",
+      "source": "middot4:2"
+    }
+  },
+  "porchLintels": {
+    "beamCount": 5,
+    "beamWidthsCubits": [
+      22,
+      24,
+      26,
+      28,
+      30
+    ],
+    "beamWidthsMetres": [
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "separation": "stone courses",
+    "woodSpecies": "translation dependent; use generic carved timber",
+    "source": "middot3:7"
+  },
+  "porchSteps": {
+    "count": 12,
+    "riserCubits": 0.5,
+    "treadCubits": 1,
+    "riserMetres": 0.25,
+    "treadMetres": 0.5,
+    "totalRiseMetres": 3,
+    "porchToAltarCubits": 22,
+    "porchToAltarMetres": 11,
+    "source": "middot3:6",
+    "landings": "literary description gives alternating landings; tread alone does not determine total stair run"
+  },
+  "cells": {
+    "northByStorey": [
+      5,
+      5,
+      5
+    ],
+    "southByStorey": [
+      5,
+      5,
+      5
+    ],
+    "westByStorey": [
+      3,
+      3,
+      2
+    ],
+    "total": 38,
+    "source": "middot4:3",
+    "cellClearWidthsCubitsByStorey": [
+      5,
+      6,
+      7
+    ],
+    "cellClearWidthsMetresByStorey": [
+      2.5,
+      3,
+      3.5
+    ],
+    "widthSource": "middot4:4",
+    "access": [
+      "adjacent cells",
+      "cell above",
+      "northeastern cell to mesibbah, wicket and heikhal"
+    ],
+    "clearHeightMetresByStorey": [
+      6,
+      6,
+      6
+    ],
+    "intermediateCeilingThicknessMetres": 1,
+    "cellHeightStatus": "Patrich reconstruction; cell heights and longitudinal bay lengths are not specified by Middot",
+    "exteriorWindows": "omitted following Patrich reconstruction; not evidence of discovered window positions"
+  },
+  "mesibbah": {
+    "widthMetres": 1.5,
+    "route": [
+      "northeast to northwest",
+      "west side toward south",
+      "south side toward upper chamber south door"
+    ],
+    "source": "middot4:5,7",
+    "proposedNorthRunMetres": 33,
+    "proposedRiseMetres": 22.5,
+    "proposedSegmentsMetres": [
+      3.5,
+      7,
+      3.5,
+      7,
+      3.5,
+      8.5
+    ],
+    "proposalSource": "patrich1988, pp.15-16",
+    "proposalStatus": "interpretive arrangement; not an excavated staircase"
+  },
+  "furnishingsAndStructure": {
+    "goldenVine": {
+      "location": "above the inner heikhal entry within the porch",
+      "source": "middot3:8; josephusWar5,5.5.4"
+    },
+    "porchColumns": {
+      "count": 4,
+      "status": "Patrich interpretation of coin and textual evidence; count not specified by Middot",
+      "source": "patrich1988"
+    },
+    "cedarTies": {
+      "location": "between porch and heikhal walls",
+      "source": "middot3:8"
+    },
+    "goldChains": {
+      "location": "from porch roof beams",
+      "source": "middot3:8"
+    },
+    "doubleCurtain": {
+      "intervalMetres": 0.5,
+      "oppositeOpenEdges": true,
+      "source": "middot4:7; patrich1988"
+    },
+    "holyOfHolies": {
+      "ark": false,
+      "otherFurnishings": false,
+      "source": "josephusWar5,5.5.5"
+    },
+    "upperChamber": {
+      "southDoor": true,
+      "cedarRoofLadder": true,
+      "maintenanceHatchesAboveHolyOfHolies": true,
+      "source": "middot4:5"
+    }
+  },
+  "uncertainties": [
+    {
+      "topic": "portal dimensions",
+      "adopted": "Middot outer20x40 and inner10x20 cubits",
+      "alternative": "Josephus War5.5.4 gives outer25x70 and inner16x55 cubits",
+      "status": "ancient sources disagree; never present chosen aperture sizes as surveyed facts"
+    },
+    {
+      "topic": "rear width",
+      "adopted": "70 cubits lower body from Middot4:7",
+      "alternative": "Josephus War5.5.4 describes rear forty cubits narrower than front",
+      "status": "Middot geometry adopted for internal consistency"
+    },
+    {
+      "topic": "facade finish",
+      "adopted": "gilded front, white dressed upper masonry",
+      "status": "literary descriptions support gold/white, exact panel division and decorative carving are interpreted",
+      "source": "josephusWar5,5.5.4-6"
+    },
+    {
+      "topic": "exterior classical ornament",
+      "adopted": "restrained outer facade; ornament concentrated around inner entry",
+      "status": "Patrich reconstruction; no complete original elevation survives"
+    },
+    {
+      "topic": "roof parapet",
+      "adopted": "3cubits parapet plus1cubit spikes",
+      "alternative": "Rabbi Judah assigns4cubits parapet and excludes spikes from dimension",
+      "source": "middot4:6"
+    },
+    {
+      "topic": "survival",
+      "status": "Temple-building walls and original blueprint do not survive; this reconstructs literary measurements, informed by scholarly interpretation. Do not confuse surviving retaining walls with the sanctuary."
+    }
+  ]
+}

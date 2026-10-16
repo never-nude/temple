@@ -17,8 +17,8 @@
 <script>
 // Save only this viewer's preferences locally; all assets and model data are public.
 try{const appearance=localStorage.getItem('temple-appearance');if(appearance==='light'||appearance==='dark')document.documentElement.dataset.theme=appearance;}catch(e){}
-let savedModel;try{savedModel=JSON.parse(localStorage.getItem('temple-viewer-v2')||'null');}catch(e){}
-window.openai={widgetState:savedModel,setWidgetState(value){this.widgetState=value;try{localStorage.setItem('temple-viewer-v2',JSON.stringify(value));}catch(e){}return Promise.resolve();}};
+let savedModel;try{savedModel=JSON.parse(localStorage.getItem('temple-viewer-v3')||'null');}catch(e){}
+window.openai={widgetState:savedModel,setWidgetState(value){this.widgetState=value;try{localStorage.setItem('temple-viewer-v3',JSON.stringify(value));}catch(e){}return Promise.resolve();}};
 </script>
 </head>
 <body>

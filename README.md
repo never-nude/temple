@@ -1,5 +1,7 @@
 # Second Temple Explorer
 
+> Work-in-progress checkpoint: this branch contains an unfinished temple-only rebuild. Read [HANDOFF.md](HANDOFF.md) before building. The generated index is still the last working release.
+
 An interactive reconstruction of the Herodian Second Temple complex in Jerusalem, around 30 CE. The current release focuses on architectural realism and interactive exploration. AR is a later step.
 
 ## Continue on another computer
