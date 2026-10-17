@@ -8,6 +8,8 @@
     <button class="btn" type="button" data-view="court" aria-pressed="false">Inner courts</button>
     <button class="btn" type="button" data-view="interior" aria-pressed="false">Inside sanctuary</button>
     <button class="btn" type="button" data-view="stoa" aria-pressed="false">Royal Stoa</button>
+    <button class="btn" type="button" data-view="capital" aria-pressed="false">Column detail</button>
+    <button class="btn" type="button" data-view="gateway" aria-pressed="false">Southern gates</button>
   </div>
   <div class="temple-stage" aria-label="Interactive 3D reconstruction of the Second Temple complex">
     <div class="temple-canvas"></div><div class="temple-labels" aria-hidden="true"></div>
@@ -26,8 +28,11 @@
     <label class="form-label">Sunlight <span data-sun-value class="tabular-nums">Morning</span><input class="form-range" type="range" data-control="sun" min="0" max="100" value="28" aria-label="Sunlight, morning to evening"></label>
   </div>
   <div class="temple-detail" aria-live="polite"><span data-detail-title>Temple Mount</span><span class="text-muted" data-detail-text>A monumental raised precinct surrounding the sanctuary and its courts.</span></div>
+  <div class="temple-navigation">
+    <label class="text-small text-muted">Controls <select class="form-select" data-control="navigation" aria-label="Navigation device"><option value="trackpad">Trackpad</option><option value="mouse">Mouse</option><option value="touch">Touchscreen</option></select></label>
+    <span class="text-small text-muted" data-navigation-help>Click-drag to orbit · two fingers to pan · pinch to zoom</span>
+  </div>
   <div class="viz-row temple-camera" role="group" aria-label="Camera controls">
-    <span class="text-small text-muted">Drag to orbit · pinch or scroll to zoom · shift-drag to pan</span>
     <button class="btn" type="button" data-camera="left" aria-label="Rotate left">↶</button>
     <button class="btn" type="button" data-camera="right" aria-label="Rotate right">↷</button>
     <button class="btn" type="button" data-camera="up" aria-label="Tilt upward">↑</button>
@@ -53,7 +58,7 @@
 #temple-explorer .temple-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
 #temple-explorer .temple-detail{display:flex;gap:8px;flex-wrap:wrap;min-height:46px;align-items:baseline;padding:10px 0}
 #temple-explorer [data-detail-title]{font-weight:500}
-#temple-explorer .temple-camera{justify-content:flex-start}
+#temple-explorer .temple-navigation{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:12px 0}#temple-explorer .temple-navigation label{display:flex;align-items:center;gap:8px}#temple-explorer .temple-navigation select{width:auto;min-width:118px}#temple-explorer .temple-camera{justify-content:flex-start}
 #temple-explorer .temple-options{margin-bottom:10px}
 @media(max-width:520px){#temple-explorer .temple-stage{height:clamp(380px,58svh,500px)}#temple-explorer .temple-fields{grid-template-columns:1fr;gap:10px}#temple-explorer .temple-heading{align-items:flex-start;gap:4px}#temple-explorer .temple-camera>span{flex-basis:100%}}
 </style>
@@ -399,7 +404,7 @@ function buildSanctuary(THREE, ctx) {
   }
   B(roofs, -29, 48.9, 0, 10, 13, 20, mats.stone);
   ashlarX(roofs, -23.96, -10, 10, 42.4, 55.4, 1);
-  ashlarX(roofs, -24, -10, 10, 48.4, 55.4);
+
   B(roofs, -29, 55.8, 0, 11.0, 0.8, 51.0, mats.roof);
   cornice(roofs, -29, 0, 10.8, 50.8, 55.2, true);
   B(roofs, -29, 57.0, 0, 10.8, 0.9, 50.8, mats.stoneLight);
@@ -1520,6 +1525,7 @@ function createTempleContactRenderer(T, renderer, scene, camera) {
   return { render, resize, dispose };
 }
 
+/* @temple-detail-modules */
 (() => {
   const root=document.getElementById('temple-explorer');
   const $=s=>root.querySelector(s), $$=s=>Array.from(root.querySelectorAll(s));
@@ -1533,7 +1539,7 @@ function createTempleContactRenderer(T, renderer, scene, camera) {
   renderer.shadowMap.enabled=true;renderer.shadowMap.autoUpdate=false;renderer.shadowMap.type=T.PCFSoftShadowMap;
   renderer.outputColorSpace=T.SRGBColorSpace;renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=.85;
   renderer.setClearColor(0,0);host.appendChild(renderer.domElement);
-  renderer.domElement.setAttribute('role','img');renderer.domElement.setAttribute('aria-label','3D temple model. Use the viewpoint and camera buttons to explore; select landmarks for descriptions.');
+  renderer.domElement.setAttribute('role','img');renderer.domElement.setAttribute('aria-label','3D temple model. Drag to orbit, use two fingers to pan and pinch to zoom. Mouse wheel zooms in Mouse mode. Viewpoint and camera buttons provide alternatives.');
   const scene=new T.Scene(), camera=new T.PerspectiveCamera(42,1,.08,5000);
   const world=new T.Group();scene.add(world);
   const contactRenderer=createTempleContactRenderer(T,renderer,scene,camera);
@@ -1586,7 +1592,7 @@ function createTempleContactRenderer(T, renderer, scene, camera) {
   const sun=new T.DirectionalLight(0xfff1d5,3.25);sun.castShadow=true;sun.shadow.mapSize.set(mobileGraphics?2048:4096,mobileGraphics?2048:4096);sun.shadow.camera.near=1;sun.shadow.camera.far=1500;sun.shadow.bias=-.00014;sun.shadow.normalBias=.17;sun.shadow.radius=2;scene.add(sun);scene.add(sun.target);
   const fill=new T.DirectionalLight(0xb8cbe1,.22);fill.position.set(-200,120,-200);scene.add(fill);
   let shadowSpan=0;const sunDirection=new T.Vector3(1,1,.55).normalize();
-  function updateShadow(){const distance=camera.position.distanceTo(target),span=distance<140?85:distance<320?180:370;if(span!==shadowSpan){shadowSpan=span;sun.shadow.camera.left=-span;sun.shadow.camera.right=span;sun.shadow.camera.top=span;sun.shadow.camera.bottom=-span;sun.shadow.camera.updateProjectionMatrix();sun.shadow.needsUpdate=true;}if(sun.target.position.distanceToSquared(target)>.001){sun.target.position.copy(target);sun.shadow.needsUpdate=true;}const position=target.clone().addScaledVector(sunDirection,650);if(sun.position.distanceToSquared(position)>.001){sun.position.copy(position);sun.shadow.needsUpdate=true;}if(sun.shadow.needsUpdate)renderer.shadowMap.needsUpdate=true;}
+  function updateShadow(){const distance=camera.position.distanceTo(target),span=distance<16?18:distance<60?48:distance<140?85:distance<320?180:370;if(span!==shadowSpan){shadowSpan=span;sun.shadow.camera.left=-span;sun.shadow.camera.right=span;sun.shadow.camera.top=span;sun.shadow.camera.bottom=-span;sun.shadow.camera.updateProjectionMatrix();sun.shadow.needsUpdate=true;}if(sun.target.position.distanceToSquared(target)>.001){sun.target.position.copy(target);sun.shadow.needsUpdate=true;}const position=target.clone().addScaledVector(sunDirection,650);if(sun.position.distanceToSquared(position)>.001){sun.position.copy(position);sun.shadow.needsUpdate=true;}if(sun.shadow.needsUpdate)renderer.shadowMap.needsUpdate=true;}
   const cutawayParts=[],pickables=[];
   function group(id){const g=new T.Group();g.userData.landmark=id;world.add(g);pickables.push(g);return g;}
   const platform=group('mount');
@@ -1647,8 +1653,16 @@ function createTempleContactRenderer(T, renderer, scene, camera) {
   const pools=group('baths');for(let n=0;n<3;n++){const x=82+n*18,z=260+(n%2)*16;box(pools,x,-17.6,z,14,.8,11,mats.stoneDark);for(const s of [-1,1]){box(pools,x+s*6.5,-16,z,1,3.5,11,masonry);box(pools,x,-16,z+s*5,14,3.5,1,masonry);}for(let i=0;i<7;i++)box(pools,x-4+i*1.2,-15.1-i*.4,z,1.2,.5,9,mats.stone);}
   const sanctuaryDiagnostics=refineTempleSanctuary(T,{world,mats,box,cutawayParts});
   root.dataset.sanctuary=JSON.stringify(sanctuaryDiagnostics);
+  const carvingDiagnostics=enrichSanctuaryDetail(T,{world,mats,box,instance,cutawayParts});
+  root.dataset.carving=JSON.stringify(carvingDiagnostics);
   const architectureDiagnostics=enhanceTempleArchitecture(T,{world,mats,box,instance,cutawayParts,pickables,group});
   root.dataset.architecture=JSON.stringify(architectureDiagnostics);
+  const colonnadeDiagnostics=enrichTempleColonnades(T,{world,mats,box,instance,cutawayParts});
+  root.dataset.colonnades=JSON.stringify(colonnadeDiagnostics);
+  const antoniaDiagnostics=rebuildAntonia(T,{world,mats,masonry,box,instance,cutawayParts,pickables});
+  root.dataset.antonia=JSON.stringify(antoniaDiagnostics);
+  const approachDiagnostics=rebuildSouthernApproaches(T,{world,mats,masonry,box,instance,cutawayParts});
+  root.dataset.approaches=JSON.stringify(approachDiagnostics);
   // Excavated decorative stonework informs these bands; exact locations are interpretive.
   for(const g of [northPortico,westPortico,eastPortico]){
     if(g===northPortico)box(g,0,.14,-220,267,.10,9,mats.mosaic);
@@ -1675,7 +1689,9 @@ function createTempleContactRenderer(T, renderer, scene, camera) {
     east:{title:'Eastern gateway',text:'The sanctuary’s processional axis runs westward from the eastern side of the mount.',point:[150,15,0],view:'east'},
     stoa:{title:'Royal Stoa',text:'The southern basilical hall has four column rows, three aisles, and a raised central roof.',point:[0,28,205],view:'stoa'},
     antonia:{title:'Antonia fortress',text:'The northwest fortress overlooks the precinct. Its southeast tower is the tallest, as Josephus describes.',point:[-120,49,-204],view:'antonia'},
-    south:{title:'Southern approaches',text:'Broad steps and paired vaulted entrances evoke the Huldah Gates; their detailed geometry is schematic.',point:[20,-1,245],view:'south'},
+    south:{title:'Southern approaches',text:'Broad alternating treads rise to a landing at the Double and Triple southern gates. Open vaulted vestibules pass beneath the Royal Stoa; their detailed layout is interpretive.',point:[20,-8,245],view:'south'},
+    capitals:{title:'Carved column capitals',text:'Two staggered crowns of smooth leaves, curled stems, open spiral scrolls, and a shaped abacus give the Corinthian capitals their carved volume. Exact decorative profiles are interpretive.',point:[123,16.7,199],view:'capital'},
+    passages:{title:'Southern vaulted passages',text:'A deep barrel-vaulted vestibule replaces the former flat arch placeholder. The continuation beyond the vestibule is left schematic.',point:[-8,-8,228],view:'vault'},
     arch:{title:'Southwest arch approach',text:'A schematic elevated entrance inspired by the archaeological remains of Robinson’s Arch.',point:[-165,6,173],view:'arch'},
     baths:{title:'Ritual baths',text:'Stepped immersion pools evoke pilgrimage preparation; these pool positions are illustrative.',point:[101,-12,265],view:'south'}
   };
@@ -1685,31 +1701,33 @@ function createTempleContactRenderer(T, renderer, scene, camera) {
     menorah:{eye:[-45,11,0],target:[-47.6,9.4,3.05]},bread:{eye:[-44.5,10.8,-6],target:[-47.3,9.2,-3.02]},
     incense:{eye:[-54,10.8,-3.3],target:[-56.65,9.2,0]},veil:{eye:[-48,22,-15],target:[-59,16,0]},vine:{eye:[-2,48,18],target:[-23,43,0]},
     sanctuary:{eye:[57,42,68],target:[-42,27,0]},altar:{eye:[46,34,-43],target:[-8,8,0]},
-    stoa:{eye:[128,3.2,204],target:[-18,8.5,204]},antonia:{eye:[-209,104,-299],target:[-119,24,-204]},
+    stoa:{eye:[128,3.2,204],target:[-18,8.5,204]},capital:{eye:[126,17.1,202.5],target:[123,16.7,199]},gateway:{eye:[-8,-12.8,247],target:[-8,-8.9,225]},vault:{eye:[-8,-12.8,230],target:[-8,-9.8,206]},antonia:{eye:[-209,104,-299],target:[-119,24,-204]},
     south:{eye:[129,33,344],target:[19,-7,236]},arch:{eye:[-250,39,232],target:[-162,-3,174]}
   };
   const select=$('[data-control="landmark"]');for(const[id,l]of Object.entries(landmarks)){const o=document.createElement('option');o.value=id;o.textContent=l.title;select.appendChild(o);}
   const labelIds=['sanctuary','women','altar','stoa','antonia','south'];
   const labels=labelIds.map(id=>{const b=document.createElement('button');b.type='button';b.className='btn text-small temple-label';b.textContent=landmarks[id].title;b.addEventListener('click',()=>{if(state.tour>=0)endTour();chooseLandmark(id,true);});labelLayer.appendChild(b);return{id,el:b,point:new T.Vector3(...landmarks[id].point)};});
-  let state={view:'sanctuary',landmark:'sanctuary',cutaway:false,labels:false,sun:28,tour:-1};
+  const defaultNavigation=matchMedia('(pointer:coarse)').matches?'touch':/Mac/i.test(navigator.platform)?'trackpad':'mouse';
+  let state={navigation:defaultNavigation,view:'sanctuary',landmark:'sanctuary',cutaway:false,labels:false,sun:28,tour:-1};
   let target=new T.Vector3(...views.sanctuary.target),radius=1,theta=0,phi=1,flight=null,dirty=true;
-  let selectedMeshes=[];
+  let selectedMeshes=[],navigation=null;
   const prefersReduced=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
-  function syncSpherical(){const v=camera.position.clone().sub(target);radius=v.length();theta=Math.atan2(v.x,v.z);phi=Math.acos(T.MathUtils.clamp(v.y/radius,-1,1));}
+  const cameraFloors={stoa:1.18,approach:3.48,gateway:-14.32,vault:-14.32,interior:8.68,menorah:8.68,bread:8.68,incense:8.68,capital:1.18};
+  function syncSpherical(){const v=camera.position.clone().sub(target);radius=v.length();theta=radius>1e-8?Math.atan2(v.x,v.z):0;phi=radius>1e-8?Math.acos(T.MathUtils.clamp(v.y/radius,-1,1)):.025;}
   function stopFlight(){if(flight){syncSpherical();flight=null;}}
-  function cameraFromSpherical(){phi=T.MathUtils.clamp(phi,.025,Math.PI/2-.015);radius=T.MathUtils.clamp(radius,1.5,1800);camera.position.set(target.x+radius*Math.sin(phi)*Math.sin(theta),target.y+radius*Math.cos(phi),target.z+radius*Math.sin(phi)*Math.cos(theta));camera.lookAt(target);dirty=true;}
-  function setView(id,animate=true){const narrow=stage.clientWidth<520;const v=id==='sanctuary'&&narrow?{eye:[73,39,16],target:[-35,28,0]}:(views[id]||views.overview);state.view=id;const toTarget=new T.Vector3(...v.target),to=new T.Vector3(...v.eye),aspect=stage.clientWidth/stage.clientHeight,fit=Math.max(1,(id==='sanctuary'&&narrow?.74:id==='overview'?1.4:1)/aspect);to.sub(toTarget).multiplyScalar(fit).add(toTarget);if(animate&&!prefersReduced())flight={start:performance.now(),from:camera.position.clone(),fromTarget:target.clone(),to,toTarget};else{flight=null;camera.position.copy(to);target.copy(toTarget);camera.lookAt(target);syncSpherical();}$$('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===id)));dirty=true;}
+  function cameraFromSpherical(){const constrained=templeConstrainCameraSphere({radius,phi,targetY:target.y},cameraFloors[state.view]??-24.75);radius=constrained.radius;phi=constrained.phi;target.y=constrained.targetY;camera.position.set(target.x+radius*Math.sin(phi)*Math.sin(theta),target.y+radius*Math.cos(phi),target.z+radius*Math.sin(phi)*Math.cos(theta));camera.lookAt(target);dirty=true;}
+  function setView(id,animate=true){navigation?.cancel();const narrow=stage.clientWidth<520;const v=id==='sanctuary'&&narrow?{eye:[73,39,16],target:[-35,28,0]}:(views[id]||views.overview);state.view=id;const aspect=stage.clientWidth/stage.clientHeight,fit=Math.max(1,(id==='sanctuary'&&narrow?.74:id==='overview'?1.4:1)/aspect),fitted=templeFitCameraPreset(v.eye,v.target,fit,cameraFloors[id]??-24.75),toTarget=new T.Vector3(...fitted.target),to=new T.Vector3(...fitted.eye);if(animate&&!prefersReduced())flight={start:performance.now(),from:camera.position.clone(),fromTarget:target.clone(),to,toTarget};else{flight=null;camera.position.copy(to);target.copy(toTarget);camera.lookAt(target);syncSpherical();}$$('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===id)));dirty=true;}
   const localSession=Math.random().toString(36).slice(2);
   function save(){try{window.openai?.setWidgetState({modelContent:{period:'Herodian Second Temple, c. 30 CE',selectedLandmark:landmarks[state.landmark]?.title,cutaway:state.cutaway},privateContent:{...state,_session:localSession,cameraAspect:camera.aspect,camera:camera.position.toArray(),target:target.toArray()}})?.catch(()=>{});}catch(e){}}
   function setCutaway(value){sun.shadow.needsUpdate=true;state.cutaway=Boolean(value);for(const m of cutawayParts)if(m)m.visible=!state.cutaway;$('[data-control="cutaway"]').checked=state.cutaway;dirty=true;}
   function setSun(value){state.sun=T.MathUtils.clamp(Number(value)||0,0,100);const a=(.12+state.sun/100*.76)*Math.PI;sunDirection.set(Math.cos(a),.22+Math.sin(a)*.9,.42).normalize();sun.intensity=3.0+Math.sin(a)*.65;sun.color.set(state.sun>80?0xffd5a5:state.sun<20?0xffe3ba:0xfff0d7);$('[data-sun-value]').textContent=state.sun<38?'Morning':state.sun<74?'Afternoon':'Evening';$('[data-control="sun"]').value=String(state.sun);dirty=true;}
   function highlight(id){for(const{mesh,material}of selectedMeshes){mesh.material.dispose();mesh.material=material;}selectedMeshes=[];world.traverse(g=>{if(g.userData.landmark!==id)return;g.traverse(m=>{if(m.isMesh&&!m.isInstancedMesh&&m.material?.isMeshStandardMaterial){const original=m.material;m.material=original.clone();m.material.onBeforeCompile=original.onBeforeCompile;m.material.customProgramCacheKey=original.customProgramCacheKey;m.material.emissive=palette.accent.clone();m.material.emissiveIntensity=.025;selectedMeshes.push({mesh:m,material:original});}});});dirty=true;}
-  function chooseLandmark(id,move=false,persist=true){if(!landmarks[id])return;state.landmark=id;select.value=id;const l=landmarks[id];$('[data-detail-title]').textContent=l.title;$('[data-detail-text]').textContent=l.text;highlight(id);if(move){if(['holies','menorah','bread','incense','veil'].includes(id))setCutaway(true);else if(['vine','sanctuary','mount','antonia','east','south','arch'].includes(id))setCutaway(false);setView(l.view);}if(persist)save();}
+  function chooseLandmark(id,move=false,persist=true){if(!landmarks[id])return;state.landmark=id;select.value=id;const l=landmarks[id];$('[data-detail-title]').textContent=l.title;$('[data-detail-text]').textContent=l.text;highlight(id);if(move){if(['holies','menorah','bread','incense','veil'].includes(id))setCutaway(true);else if(['vine','sanctuary','mount','antonia','east','south','arch','capitals','passages'].includes(id))setCutaway(false);setView(l.view);}if(persist)save();}
   const stops=['south','stoa','outer','soreg','women','nicanor','israel','altar','sanctuary','vine','menorah','bread','incense','veil','holies','antonia'];
   function renderTourUI(){const active=state.tour>=0;$('[data-action="previous"]').hidden=!active;$('[data-action="previous"]').disabled=state.tour===0;$('[data-action="next"]').hidden=!active;$('[data-action="next"]').textContent=state.tour===stops.length-1?'Finish tour':'Next stop';$('[data-action="tour"]').textContent=active?'Stop tour':'Start guided tour';if(active)$('[data-detail-title]').textContent=(state.tour+1)+' / '+stops.length+' · '+landmarks[stops[state.tour]].title;}
   function tourStop(n){state.tour=T.MathUtils.clamp(n,0,stops.length-1);setCutaway(state.tour>=10&&state.tour<=14);chooseLandmark(stops[state.tour],true,false);renderTourUI();save();}
   function endTour(){state.tour=-1;chooseLandmark(state.landmark,false,false);renderTourUI();save();}
-  $$('[data-view]').forEach(b=>b.addEventListener('click',()=>{if(state.tour>=0)endTour();const id=b.dataset.view;setCutaway(id==='interior');chooseLandmark(({sanctuary:'sanctuary',overview:'mount',east:'east',approach:'sanctuary',court:'priests',interior:'sanctuary',stoa:'stoa'})[id],false,false);setView(id);save();}));
+  $$('[data-view]').forEach(b=>b.addEventListener('click',()=>{if(state.tour>=0)endTour();const id=b.dataset.view;setCutaway(id==='interior');chooseLandmark(({sanctuary:'sanctuary',overview:'mount',east:'east',approach:'sanctuary',court:'priests',interior:'sanctuary',stoa:'stoa',capital:'capitals',gateway:'south'})[id],false,false);setView(id);save();}));
   select.addEventListener('change',()=>{if(state.tour>=0)endTour();chooseLandmark(select.value,true);});
   $('[data-control="cutaway"]').addEventListener('change',e=>{setCutaway(e.target.checked);save();});
   $('[data-control="labels"]').addEventListener('change',e=>{state.labels=e.target.checked;dirty=true;save();});
@@ -1717,25 +1735,25 @@ function createTempleContactRenderer(T, renderer, scene, camera) {
   $('[data-action="tour"]').addEventListener('click',()=>state.tour<0?tourStop(0):endTour());
   $('[data-action="previous"]').addEventListener('click',()=>tourStop(state.tour-1));$('[data-action="next"]').addEventListener('click',()=>state.tour===stops.length-1?endTour():tourStop(state.tour+1));
   $$('[data-camera]').forEach(b=>b.addEventListener('click',()=>{stopFlight();const a=b.dataset.camera;if(a==='left')theta-=.2;if(a==='right')theta+=.2;if(a==='up')phi-=.12;if(a==='down')phi+=.12;if(a==='in')radius*=.8;if(a==='out')radius*=1.25;cameraFromSpherical();save();}));
-  const pointers=new Map();let dragging=false,firstDown=null,pinchDistance=0;
-  renderer.domElement.addEventListener('pointerdown',e=>{stopFlight();renderer.domElement.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});firstDown={x:e.clientX,y:e.clientY,time:performance.now()};dragging=false;if(pointers.size===2){const p=[...pointers.values()];pinchDistance=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y);}});
-  renderer.domElement.addEventListener('pointermove',e=>{const prev=pointers.get(e.pointerId);if(!prev)return;const dx=e.clientX-prev.x,dy=e.clientY-prev.y;pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});if(firstDown&&Math.hypot(e.clientX-firstDown.x,e.clientY-firstDown.y)>5)dragging=true;if(pointers.size===2){const p=[...pointers.values()],d=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y);if(d>0&&pinchDistance>0)radius*=pinchDistance/d;pinchDistance=d;dragging=true;}else if(e.shiftKey||e.buttons===2){const right=new T.Vector3().setFromMatrixColumn(camera.matrix,0),up=new T.Vector3().setFromMatrixColumn(camera.matrix,1),speed=radius*.0018;target.addScaledVector(right,-dx*speed).addScaledVector(up,dy*speed);target.y=T.MathUtils.clamp(target.y,-16,90);}else{theta-=dx*.007;phi-=dy*.006;}cameraFromSpherical();});
   const ray=new T.Raycaster(),mouse=new T.Vector2();
   function pick(e){const rect=renderer.domElement.getBoundingClientRect();mouse.set((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1);ray.setFromCamera(mouse,camera);const hits=ray.intersectObjects(pickables,true);for(const hit of hits){let obj=hit.object,visible=true;for(let p=obj;p;p=p.parent)if(!p.visible)visible=false;if(!visible)continue;let id;while(obj){if(obj.userData.landmark){id=obj.userData.landmark;break;}obj=obj.parent;}if(id){if(state.tour>=0)endTour();chooseLandmark(id,false);break;}}}
-  renderer.domElement.addEventListener('pointerup',e=>{const wasSingle=pointers.size===1;pointers.delete(e.pointerId);if(!dragging&&wasSingle&&firstDown&&performance.now()-firstDown.time<600)pick(e);if(pointers.size===0){save();firstDown=null;}else dragging=true;});
-  renderer.domElement.addEventListener('pointercancel',e=>{pointers.delete(e.pointerId);dragging=true;});renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());
-  renderer.domElement.addEventListener('wheel',e=>{e.preventDefault();stopFlight();radius*=Math.exp(T.MathUtils.clamp(e.deltaY,-120,120)*.0018);cameraFromSpherical();clearTimeout(wheelSave);wheelSave=setTimeout(save,220);},{passive:false});let wheelSave;
-  function resize(){const r=stage.getBoundingClientRect();if(r.width<=0)return;renderer.setSize(r.width,r.height);contactRenderer.resize(r.width,r.height);camera.aspect=r.width/r.height;camera.updateProjectionMatrix();dirty=true;}
+  function setNavigationMode(mode){state.navigation=['trackpad','mouse','touch'].includes(mode)?mode:defaultNavigation;$('[data-control="navigation"]').value=state.navigation;$('[data-navigation-help]').textContent=state.navigation==='mouse'?'Left-drag to orbit · right/middle-drag to pan · wheel to zoom':state.navigation==='touch'?'Drag to orbit · two fingers to pan and pinch to zoom':'Click-drag to orbit · two fingers to pan · pinch to zoom';navigation?.cancel();}
+  navigation=createTempleNavigation(T,{canvas:renderer.domElement,camera,stage,getMode:()=>state.navigation,getPose:()=>({radius,theta,phi,target:target.clone()}),onStart:stopFlight,onCommit:save,onPick:pick,
+    orbit(dx,dy){theta-=dx*.007;phi-=dy*.006;cameraFromSpherical();},
+    applyPose(pose){const rawY=pose.target.y,oldPhi=phi;radius=pose.radius;target.copy(pose.target);target.y=T.MathUtils.clamp(target.y,-24,100);cameraFromSpherical();return target.y!==rawY||phi!==oldPhi;}
+  });
+  $('[data-control="navigation"]').addEventListener('change',e=>{setNavigationMode(e.target.value);save();});setNavigationMode(state.navigation);
+  function resize(){navigation?.cancel();const r=stage.getBoundingClientRect();if(r.width<=0)return;renderer.setSize(r.width,r.height);contactRenderer.resize(r.width,r.height);camera.aspect=r.width/r.height;camera.updateProjectionMatrix();dirty=true;}
   const resizeObserver=new ResizeObserver(resize);resizeObserver.observe(stage);
-  function applySaved(raw){const s=raw?.privateContent;if(!s||typeof s!=='object'||s._session===localSession)return;state.labels=typeof s.labels==='boolean'?s.labels:false;$('[data-control="labels"]').checked=state.labels;setCutaway(s.cutaway);setSun(typeof s.sun==='number'?s.sun:28);chooseLandmark(s.landmark||'sanctuary',false,false);setView(views[s.view]?s.view:'sanctuary',false);if((!s.cameraAspect||Math.abs(s.cameraAspect-camera.aspect)<.25)&&Array.isArray(s.camera)&&s.camera.length===3&&s.camera.every(Number.isFinite)&&Array.isArray(s.target)&&s.target.length===3&&s.target.every(Number.isFinite)){camera.position.fromArray(s.camera);target.fromArray(s.target);camera.lookAt(target);syncSpherical();}state.tour=Number.isInteger(s.tour)&&s.tour>=0&&s.tour<stops.length?s.tour:-1;renderTourUI();dirty=true;}
+  function applySaved(raw){const s=raw?.privateContent;if(!s||typeof s!=='object'||s._session===localSession)return;setNavigationMode(s.navigation||defaultNavigation);state.labels=typeof s.labels==='boolean'?s.labels:false;$('[data-control="labels"]').checked=state.labels;setCutaway(s.cutaway);setSun(typeof s.sun==='number'?s.sun:28);chooseLandmark(s.landmark||'sanctuary',false,false);setView(views[s.view]?s.view:'sanctuary',false);if((!s.cameraAspect||Math.abs(s.cameraAspect-camera.aspect)<.25)&&Array.isArray(s.camera)&&s.camera.length===3&&s.camera.every(Number.isFinite)&&Array.isArray(s.target)&&s.target.length===3&&s.target.every(Number.isFinite)){camera.position.fromArray(s.camera);target.fromArray(s.target);camera.lookAt(target);syncSpherical();cameraFromSpherical();}state.tour=Number.isInteger(s.tour)&&s.tour>=0&&s.tour<stops.length?s.tour:-1;renderTourUI();dirty=true;}
   resize();setView('sanctuary',false);setSun(28);chooseLandmark('sanctuary',false,false);applySaved(window.openai?.widgetState);const handleGlobalState=e=>{if(e.detail?.globals?.widgetState)applySaved(e.detail.globals.widgetState);};window.addEventListener('openai:set_globals',handleGlobalState);
   function updateTheme(){palette=colors();highlight(state.landmark);dirty=true;}
   const schemeQuery=matchMedia('(prefers-color-scheme: dark)');schemeQuery.addEventListener('change',updateTheme);const themeObserver=new MutationObserver(updateTheme);themeObserver.observe(document.documentElement,{attributes:true,attributeFilter:['class','style','data-theme']});
   const projected=new T.Vector3();
   function drawLabels(){const w=stage.clientWidth,h=stage.clientHeight,occupied=[];const sorted=[...labels].sort((a,b)=>Number(b.id===state.landmark)-Number(a.id===state.landmark));for(const l of sorted){const selected=l.id===state.landmark,near=radius<125;l.el.hidden=false;const lw=l.el.offsetWidth,lh=l.el.offsetHeight;projected.copy(l.point).project(camera);const x=(projected.x+1)*w/2,y=(1-projected.y)*h/2;let visible=state.labels&&projected.z<1&&projected.z>-1&&x>lw/2+4&&x<w-lw/2-4&&y>lh+4&&y<h-30&&(!near||selected||['sanctuary','women','altar'].includes(l.id));if(visible){const bound=[x-lw/2-4,y-lh-4,x+lw/2+4,y+4];if(occupied.some(b=>bound[0]<b[2]&&bound[2]>b[0]&&bound[1]<b[3]&&bound[3]>b[1]))visible=false;else occupied.push(bound);}l.el.hidden=!visible;if(visible){l.el.style.left=x+'px';l.el.style.top=y+'px';l.el.setAttribute('aria-pressed',String(selected));}}labelLayer.setAttribute('aria-hidden',String(!state.labels));const north=new T.Vector3(0,0,-1).applyQuaternion(camera.quaternion.clone().invert());const angle=Math.atan2(north.x,-north.y)*180/Math.PI;$('.temple-orientation').textContent='N '+(Math.abs(angle)<30?'↑':angle>30&&angle<150?'→':angle< -30&&angle> -150?'←':'↓')+' · east-facing sanctuary';}
   let visible=true;const intersectionObserver=new IntersectionObserver(entries=>{visible=entries[0].isIntersecting;if(visible)dirty=true;});intersectionObserver.observe(stage);
-  function dispose(){resizeObserver.disconnect();intersectionObserver.disconnect();themeObserver.disconnect();schemeQuery.removeEventListener('change',updateTheme);window.removeEventListener('openai:set_globals',handleGlobalState);clearTimeout(wheelSave);const geometries=new Set(),materials=new Set(Object.values(mats)),textures=new Set(textureObjects);for(const s of selectedMeshes)materials.add(s.material);scene.traverse(o=>{if(o.geometry)geometries.add(o.geometry);if(o.material)for(const m of(Array.isArray(o.material)?o.material:[o.material]))materials.add(m);});for(const m of materials){for(const value of Object.values(m))if(value?.isTexture)textures.add(value);m.dispose();}for(const g of geometries)g.dispose();for(const t of textures)t.dispose();contactRenderer.dispose();envTarget.dispose();renderer.dispose();}
-  function frame(now){if(!root.isConnected){dispose();return;}requestAnimationFrame(frame);if(!visible)return;if(flight){const t=Math.min(1,(now-flight.start)/850),k=t*t*(3-2*t);camera.position.lerpVectors(flight.from,flight.to,k);target.lerpVectors(flight.fromTarget,flight.toTarget,k);camera.lookAt(target);dirty=true;if(t===1){flight=null;syncSpherical();save();}}if(dirty){const near=Math.max(.04,Math.min(1.2,camera.position.distanceTo(target)*.002));if(Math.abs(camera.near-near)>.005){camera.near=near;camera.updateProjectionMatrix();}updateShadow();renderer.info.reset();contactRenderer.render();drawLabels();root.dataset.glError=String(renderer.getContext().getError());root.dataset.contextLost=String(renderer.getContext().isContextLost());root.dataset.drawCalls=String(renderer.info.render.calls);root.dataset.triangles=String(renderer.info.render.triangles);dirty=false;}}
+  function dispose(){resizeObserver.disconnect();intersectionObserver.disconnect();themeObserver.disconnect();schemeQuery.removeEventListener('change',updateTheme);window.removeEventListener('openai:set_globals',handleGlobalState);navigation?.dispose();const geometries=new Set(),materials=new Set(Object.values(mats)),textures=new Set(textureObjects);for(const s of selectedMeshes)materials.add(s.material);scene.traverse(o=>{if(o.geometry)geometries.add(o.geometry);if(o.material)for(const m of(Array.isArray(o.material)?o.material:[o.material]))materials.add(m);});for(const m of materials){for(const value of Object.values(m))if(value?.isTexture)textures.add(value);m.dispose();}for(const g of geometries)g.dispose();for(const t of textures)t.dispose();contactRenderer.dispose();envTarget.dispose();renderer.dispose();}
+  function frame(now){if(!root.isConnected){dispose();return;}requestAnimationFrame(frame);if(!visible)return;if(flight){const t=Math.min(1,(now-flight.start)/850),k=t*t*(3-2*t);camera.position.lerpVectors(flight.from,flight.to,k);target.lerpVectors(flight.fromTarget,flight.toTarget,k);camera.lookAt(target);dirty=true;if(t===1){flight=null;syncSpherical();save();}}if(dirty){const near=Math.max(.04,Math.min(1.2,camera.position.distanceTo(target)*.002));if(Math.abs(camera.near-near)>.005){camera.near=near;camera.updateProjectionMatrix();}const columnDetail=world.userData.updateTempleColumnDetail?.(camera);if(columnDetail?.changed)sun.shadow.needsUpdate=true;if(columnDetail)root.dataset.columnDetail=JSON.stringify(columnDetail);updateShadow();renderer.info.reset();contactRenderer.render();drawLabels();root.dataset.glError=String(renderer.getContext().getError());root.dataset.contextLost=String(renderer.getContext().isContextLost());root.dataset.camera=JSON.stringify({view:state.view,position:camera.position.toArray(),target:target.toArray(),radius,phi,theta});root.dataset.drawCalls=String(renderer.info.render.calls);root.dataset.triangles=String(renderer.info.render.triangles);dirty=false;}}
   resize();loading.hidden=true;root.dataset.ready='true';root.dataset.meshes=String(boxCache.size);requestAnimationFrame(frame);
 })();
 </script>

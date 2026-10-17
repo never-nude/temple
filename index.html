@@ -33,6 +33,8 @@ window.openai={widgetState:savedModel,setWidgetState(value){this.widgetState=val
     <button class="btn" type="button" data-view="court" aria-pressed="false">Inner courts</button>
     <button class="btn" type="button" data-view="interior" aria-pressed="false">Inside sanctuary</button>
     <button class="btn" type="button" data-view="stoa" aria-pressed="false">Royal Stoa</button>
+    <button class="btn" type="button" data-view="capital" aria-pressed="false">Column detail</button>
+    <button class="btn" type="button" data-view="gateway" aria-pressed="false">Southern gates</button>
   </div>
   <div class="temple-stage" aria-label="Interactive 3D reconstruction of the Second Temple complex">
     <div class="temple-canvas"></div><div class="temple-labels" aria-hidden="true"></div>
@@ -51,8 +53,11 @@ window.openai={widgetState:savedModel,setWidgetState(value){this.widgetState=val
     <label class="form-label">Sunlight <span data-sun-value class="tabular-nums">Morning</span><input class="form-range" type="range" data-control="sun" min="0" max="100" value="28" aria-label="Sunlight, morning to evening"></label>
   </div>
   <div class="temple-detail" aria-live="polite"><span data-detail-title>Temple Mount</span><span class="text-muted" data-detail-text>A monumental raised precinct surrounding the sanctuary and its courts.</span></div>
+  <div class="temple-navigation">
+    <label class="text-small text-muted">Controls <select class="form-select" data-control="navigation" aria-label="Navigation device"><option value="trackpad">Trackpad</option><option value="mouse">Mouse</option><option value="touch">Touchscreen</option></select></label>
+    <span class="text-small text-muted" data-navigation-help>Click-drag to orbit · two fingers to pan · pinch to zoom</span>
+  </div>
   <div class="viz-row temple-camera" role="group" aria-label="Camera controls">
-    <span class="text-small text-muted">Drag to orbit · pinch or scroll to zoom · shift-drag to pan</span>
     <button class="btn" type="button" data-camera="left" aria-label="Rotate left">↶</button>
     <button class="btn" type="button" data-camera="right" aria-label="Rotate right">↷</button>
     <button class="btn" type="button" data-camera="up" aria-label="Tilt upward">↑</button>
@@ -78,7 +83,7 @@ window.openai={widgetState:savedModel,setWidgetState(value){this.widgetState=val
 #temple-explorer .temple-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
 #temple-explorer .temple-detail{display:flex;gap:8px;flex-wrap:wrap;min-height:46px;align-items:baseline;padding:10px 0}
 #temple-explorer [data-detail-title]{font-weight:500}
-#temple-explorer .temple-camera{justify-content:flex-start}
+#temple-explorer .temple-navigation{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:12px 0}#temple-explorer .temple-navigation label{display:flex;align-items:center;gap:8px}#temple-explorer .temple-navigation select{width:auto;min-width:118px}#temple-explorer .temple-camera{justify-content:flex-start}
 #temple-explorer .temple-options{margin-bottom:10px}
 @media(max-width:520px){#temple-explorer .temple-stage{height:clamp(380px,58svh,500px)}#temple-explorer .temple-fields{grid-template-columns:1fr;gap:10px}#temple-explorer .temple-heading{align-items:flex-start;gap:4px}#temple-explorer .temple-camera>span{flex-basis:100%}}
 </style>
@@ -424,7 +429,7 @@ function buildSanctuary(THREE, ctx) {
   }
   B(roofs, -29, 48.9, 0, 10, 13, 20, mats.stone);
   ashlarX(roofs, -23.96, -10, 10, 42.4, 55.4, 1);
-  ashlarX(roofs, -24, -10, 10, 48.4, 55.4);
+
   B(roofs, -29, 55.8, 0, 11.0, 0.8, 51.0, mats.roof);
   cornice(roofs, -29, 0, 10.8, 50.8, 55.2, true);
   B(roofs, -29, 57.0, 0, 10.8, 0.9, 50.8, mats.stoneLight);
@@ -1545,6 +1550,1149 @@ function createTempleContactRenderer(T, renderer, scene, camera) {
   return { render, resize, dispose };
 }
 
+/* Interpretive architectural refinement, not an excavated plan of Antonia.
+ * Josephus, War 5.5.8 describes a stone-clad rock, palatial rooms and courts,
+ * four corner towers (the southeast higher), and passages to both cloisters.
+ * Existing footprint and tower heights are retained; courts, window profiles,
+ * roof terraces and circulation are architectural interpretation in metres.
+ */
+function rebuildAntonia(T, ctx) {
+  const { world, mats, cutawayParts } = ctx;
+  const antonia = world.children.find(o => o.userData.landmark === 'antonia');
+  if (!antonia) return { error: 'Antonia landmark not found' };
+  if (antonia.userData.architectureV2) return antonia.userData.architectureV2;
+  antonia.updateWorldMatrix(true, true);
+  const beforeBounds = new T.Box3().setFromObject(antonia);
+  const old = new Set(); antonia.traverse(o => old.add(o));
+  const wasCutaway = cutawayParts.some(o => old.has(o) && !o.visible);
+  for (let i = cutawayParts.length - 1; i >= 0; i--) if (old.has(cutawayParts[i])) cutawayParts.splice(i, 1);
+  const oldGeometries = new Set(); antonia.traverse(o => { if (o.geometry) oldGeometries.add(o.geometry); });
+  antonia.clear();
+  // Geometry may be shared with the rest of the temple. Dispose only orphans.
+  const used = new Set(); world.traverse(o => { if (o.geometry) used.add(o.geometry); });
+  for (const g of oldGeometries) if (!used.has(g)) g.dispose();
+
+  const masonry = ctx.masonry || mats.stone;
+  const staticParts = new T.Group(); staticParts.name = 'Antonia — stone scarp, court, galleries and four towers'; antonia.add(staticParts);
+  const roofParts = new T.Group(); roofParts.name = 'Antonia — removable roof terraces'; roofParts.visible=!wasCutaway; antonia.add(roofParts); cutawayParts.push(roofParts);
+  const batches = new Map();
+  const unitBox = new T.BoxGeometry(1, 1, 1);
+  const matrix = new T.Matrix4(), transform = new T.Object3D(), v = new T.Vector3(), n = new T.Vector3();
+  const normalMatrix = new T.Matrix3();
+  function append(parent, geometry, material, x=0, y=0, z=0, sx=1, sy=1, sz=1, ry=0, rx=0, rz=0) {
+    let byMaterial = batches.get(parent); if (!byMaterial) { byMaterial = new Map(); batches.set(parent, byMaterial); }
+    let b = byMaterial.get(material); if (!b) { b={ p:[], n:[], uv:[] }; byMaterial.set(material,b); }
+    transform.position.set(x,y,z); transform.scale.set(sx,sy,sz); transform.rotation.set(rx,ry,rz); transform.updateMatrix(); matrix.copy(transform.matrix); normalMatrix.getNormalMatrix(matrix);
+    const p=geometry.attributes.position, normal=geometry.attributes.normal, uv=geometry.attributes.uv, index=geometry.index, count=index ? index.count : p.count;
+    for(let i=0;i<count;i++) { const j=index ? index.getX(i) : i; v.fromBufferAttribute(p,j).applyMatrix4(matrix); n.fromBufferAttribute(normal,j).applyNormalMatrix(normalMatrix); b.p.push(v.x,v.y,v.z); b.n.push(n.x,n.y,n.z); b.uv.push(uv?uv.getX(j):0,uv?uv.getY(j):0); }
+  }
+  const box=(p,x,y,z,w,h,d,m=mats.stone)=>{if(w>0&&h>0&&d>0)append(p,unitBox,m,x,y,z,w,h,d);};
+  const slab=(x,z,w,d,y,h=.22,p=staticParts,m=mats.stoneLight)=>box(p,x,y,z,w,h,d,m);
+
+  // Actual hollow reveal. Its back is recessed within the wall, leaving four
+  // lit splayed stone surfaces between the facade and the shaded interior.
+  function reveal(axis,u,fixed,y,width,height,thickness,outward,parent=staticParts) {
+    const positions=[],uvs=[];
+    const front=outward*thickness/2+.012*outward, back=-outward*thickness/2;
+    const fw=width/2,fh=height/2,bw=fw*.72,bh=fh*.84;
+    const corners=[[-fw,-fh,front],[fw,-fh,front],[fw,fh,front],[-fw,fh,front],[-bw,-bh,back],[bw,-bh,back],[bw,bh,back],[-bw,bh,back]];
+    for(let j=0;j<4;j++){const k=(j+1)%4;for(const i of outward>0?[j,k,j+4,k,k+4,j+4]:[j,j+4,k,k,j+4,k+4]){const a=corners[i];positions.push(a[0],a[1],a[2]);uvs.push(a[0],a[1]);}}
+    const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(positions,3));g.setAttribute('uv',new T.Float32BufferAttribute(uvs,2));g.computeVertexNormals();
+    const x=axis==='x'?u:fixed,z=axis==='x'?fixed:u,ry=axis==='x'?0:Math.PI/2;
+    append(parent,g,mats.stoneLight,x,y,z,1,1,1,ry);
+    const backZ=back-.025*outward;
+    if(axis==='x')box(parent,u,y,fixed+backZ,width*.74,height*.86,.055,mats.dark);
+    else box(parent,fixed+backZ,y,u,.055,height*.86,width*.74,mats.dark);
+    // Dressed, projecting sill and thin lintel relieve each otherwise plain bay.
+    if(axis==='x'){box(parent,u,y-height/2-.12,fixed+outward*(thickness/2+.13),width+.48,.24,.55,mats.stoneLight);box(parent,u,y+height/2+.1,fixed+outward*(thickness/2+.06),width+.34,.2,.3,mats.stoneLight);}
+    else{box(parent,fixed+outward*(thickness/2+.13),y-height/2-.12,u,.55,.24,width+.48,mats.stoneLight);box(parent,fixed+outward*(thickness/2+.06),y+height/2+.1,u,.3,.2,width+.34,mats.stoneLight);}
+    g.dispose();
+  }
+  // Walls are built around openings, rather than laying black rectangles over
+  // solid boxes. Each row is a band and piers, merged in the final draw batches.
+  function wall(axis,center,fixed,length,bottom,top,thickness,rows,outward,material=masonry,parent=staticParts) {
+    const B=(a,b,lo,hi)=>{if(axis==='x')box(parent,center+(a+b)/2,(lo+hi)/2,fixed,b-a,hi-lo,thickness,material);else box(parent,fixed,(lo+hi)/2,center+(a+b)/2,thickness,hi-lo,b-a,material);};
+    let cursor=bottom;
+    for(const row of rows){const lo=Math.max(bottom,row.y-row.h/2),hi=Math.min(top,row.y+row.h/2);if(hi<=lo)continue;if(lo>cursor)B(-length/2,length/2,cursor,lo);let u=-length/2;
+      for(const c of row.centers){const a=c-row.w/2,b=c+row.w/2;if(a>u)B(u,a,lo,hi);u=b;if(!row.noReveal)reveal(axis,center+c,fixed,row.y,row.w,row.h,thickness,outward,parent);}
+      if(u<length/2)B(u,length/2,lo,hi);cursor=hi;
+    }
+    if(cursor<top)B(-length/2,length/2,cursor,top);
+  }
+
+  // Low battered stone-clad scarp respects the previous plinth's extent and
+  // model elevation. It does not claim to recover the rock's ancient height.
+  function batterWall(axis,u,fixed,length,outward) {
+    const lower=outward*.66,upper=0,positions=[],uv=[];
+    const points=[[-length/2,0,lower],[length/2,0,lower],[-length/2,4.1,upper],[length/2,4.1,upper]];
+    for(const j of outward>0?[0,1,2,1,3,2]:[0,2,1,1,2,3]){const p=points[j];positions.push(p[0],p[1],p[2]);uv.push(p[0],p[1]);}
+    const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(positions,3));g.setAttribute('uv',new T.Float32BufferAttribute(uv,2));g.computeVertexNormals();append(staticParts,g,masonry,axis==='x'?u:fixed,0,axis==='x'?fixed:u,1,1,1,axis==='x'?0:Math.PI/2);g.dispose();
+  }
+  batterWall('x',-120,-232,58,-1);batterWall('z',-204,-149,56,-1);batterWall('z',-204,-91,56,1);
+  // The southern foundation is split around a genuine descending passage.
+  batterWall('x',-135.6,-176,26.8,1);batterWall('x',-104.4,-176,26.8,1);
+  // Separate floor rings leave the descending main entrance genuinely open.
+  slab(-120,-204,27,25,4.16,.28,staticParts,mats.pavement);
+  slab(-140.5,-204,14,53,4.16,.28);slab(-99.5,-204,14,53,4.16,.28);slab(-120,-223.5,27,14,4.16,.28);
+  slab(-128.0,-184.5,11,14,4.16,.28);slab(-112.0,-184.5,11,14,4.16,.28);
+  const windows=[-16,-8,0,8,16];
+  const regularRows=[{y:12.8,h:2.8,w:1.55,centers:windows},{y:20.2,h:2.8,w:1.55,centers:windows}];
+  // The permanent wall masonry supports the copings independently of the
+  // removable roof slabs. Stop below the terrace's top to avoid coincident
+  // horizontal faces when the roof is present.
+  const wallTop=28.36;
+  wall('x',-120,-230.5,55,4.3,wallTop,1.55,regularRows,-1);
+  wall('x',-120,-177.5,55,0,wallTop,1.55,[{y:3.25,h:6.5,w:4.6,centers:[0],noReveal:true},...regularRows],1);
+  wall('z',-204,-147.5,53,4.3,wallTop,1.55,regularRows,-1);
+  wall('z',-204,-92.5,53,4.3,wallTop,1.55,regularRows,1);
+
+  // An annular barrel forms a real soffit and deep stone opening. Its ends
+  // remain open; only the shadowed side chambers beyond the court are closed.
+  function arch(axis,u,fixed,base,width,height,depth,outward=1) {
+    if(base===0)base=.035; // Keep the entrance's beveled sill above the old datum.
+    const r=width/2,outer=r+.52,spring=base+height-r,shape=new T.Shape();
+    shape.moveTo(-outer,0);shape.lineTo(-outer,height+.52);shape.lineTo(outer,height+.52);shape.lineTo(outer,0);shape.lineTo(r,0);shape.lineTo(r,height-r);shape.absarc(0,height-r,r,0,Math.PI,false);shape.lineTo(-r,0);shape.closePath();
+    const g=new T.ExtrudeGeometry(shape,{depth,bevelEnabled:true,bevelSize:.035,bevelThickness:.035,bevelSegments:1,curveSegments:12});
+    const x=axis==='x'?u:fixed-depth/2,z=axis==='x'?fixed-depth/2:u;append(staticParts,g,mats.stoneLight,x,base,z,1,1,1,axis==='x'?0:Math.PI/2);g.dispose();
+    for(let i=0;i<11;i++){const a=(i+.5)*Math.PI/11,cu=Math.cos(a)*(r+.26),cy=spring+Math.sin(a)*(r+.26);if(axis==='x')append(staticParts,unitBox,mats.stone,u+cu,cy,fixed+outward*(depth/2+.055),.46,.44,.14,0,0,a-Math.PI/2);else append(staticParts,unitBox,mats.stone,fixed+outward*(depth/2+.055),cy,u+cu,.14,.44,.46,0,Math.PI/2-a);}
+  }
+  arch('x',-120,-177.5,0,4.6,6.5,2.2,1);
+  // A long, gentle stair gives the entrance actual depth and a visible floor.
+  for(let i=0;i<22;i++){const h=.195*(i+1);box(staticParts,-120,h/2,-175.0-i*.74,3.8,h,.76,mats.stoneLight);}
+  slab(-120,-191.3,4.8,1.8,4.3,.25);
+
+  // Fill only the spaces outside adjacent arch frames. A whole rectangular
+  // wall here would cover their curved soffits and close the real openings.
+  let arcadeInfillPiers=0;
+  function infillArcade(axis,center,fixed,length,centers,width) {
+    const halfFrame=width/2+.52;
+    let cursor=-length/2;
+    const fill=(a,b)=>{
+      if(b-a<.001)return;
+      if(axis==='x')box(staticParts,center+(a+b)/2,8.35,fixed,b-a,8.1,1.05,mats.stoneLight);
+      else box(staticParts,fixed,8.35,center+(a+b)/2,1.05,8.1,b-a,mats.stoneLight);
+      arcadeInfillPiers++;
+    };
+    for(const position of centers){fill(cursor,position-halfFrame);cursor=position+halfFrame;}
+    fill(cursor,length/2);
+  }
+  const innerX=[-10.8,-5.4,0,5.4,10.8],innerZ=[-9.4,-3.14,3.14,9.4];
+  for(const sign of [-1,1]){
+    const z=-204+sign*12.5,x=-120+sign*13.5;
+    for(const u of innerX)arch('x',-120+u,z,4.3,4.25,7.7,1.05,-sign);
+    for(const u of innerZ)arch('z',-204+u,x,4.3,4.8,7.7,1.05,-sign);
+    infillArcade('x',-120,z,27,innerX,4.25);
+    infillArcade('z',-204,x,25,innerZ,4.8);
+    wall('x',-120,z,27,12.4,wallTop,1.05,[{y:17.0,h:2.8,w:1.8,centers:innerX},{y:23.0,h:2.4,w:1.6,centers:innerX}],-sign,mats.stone);
+    wall('z',-204,x,25,12.4,wallTop,1.05,[{y:17.0,h:2.8,w:1.8,centers:innerZ},{y:23.0,h:2.4,w:1.6,centers:innerZ}],-sign,mats.stone);
+    // Gallery stringcourse and actual walk surface behind the court arcade.
+    slab(-120,z,28.0,1.65,12.55,.42);slab(x,-204,1.65,25,12.55,.42);
+  }
+  // Broad, quiet roof terraces. Open center remains visible without cutaway.
+  for(const [x,z,w,d]of[[-140.5,-204,14,53],[-99.5,-204,14,53],[-120,-223.5,27,14],[-120,-184.5,27,14]])slab(x,z,w,d,28.15,.55,roofParts,mats.pavement);
+  for(const sign of[-1,1]){
+    const x=-120+sign*27.5,z=-204+sign*26.5;
+    slab(-120,z,55.8,.62,28.42,.4);slab(x,-204,.62,53.8,28.42,.4);
+    box(staticParts,-120,29.03,z,55,.84,.5,mats.stone);box(staticParts,x,29.03,-204,.5,.84,53,mats.stone);
+    slab(-120,z,55.7,.82,29.52,.18);slab(x,-204,.82,53.7,29.52,.18);
+    slab(-120,-204+sign*12.5,28.2,.6,28.48,.3);slab(-120+sign*13.5,-204,.6,25.5,28.48,.3);
+    box(staticParts,-120,29.02,-204+sign*12.5,27,.8,.4,mats.stoneLight);box(staticParts,-120+sign*13.5,29.02,-204,.4,.8,25,mats.stoneLight);
+  }
+
+  // Internal dogleg flights emerge at the existing cloister roof elevation.
+  // Architecture only: no conjectural barracks furniture or Roman statuary.
+  function guardStair(x,z,ry) {
+    const g=new T.Group();g.name='Guard stair passage toward the north/west cloisters';g.position.set(x,4.3,z);g.rotation.y=ry;staticParts.add(g);
+    for(let i=0;i<24;i++){const h=.2*(i+1);box(g,-.92,h/2,-3.6+i*.3,1.52,h,.32,mats.stoneLight);box(g,.92,4.8+h/2,3.6-i*.3,1.52,h,.32,mats.stoneLight);}
+    box(g,0,4.68,3.9,3.5,.24,1.1,mats.stoneLight);box(g,.92,9.48,-4.0,1.6,.24,1.0,mats.stoneLight);
+    // Solid low parapets at the landings avoid a modern metal-rail appearance.
+    box(g,0,5.13,4.38,3.6,.72,.2,mats.stone);box(g,1.75,9.95,-4.0,.2,.8,1.1,mats.stone);
+  }
+  guardStair(-140,-204,0);guardStair(-120,-184.5,Math.PI/2);
+  slab(-139.08,-216.9,1.6,17.0,13.98,.24);slab(-133.0,-183.58,17.0,1.6,13.98,.24);
+
+  const towers=[];
+  for(const x of[-144,-96])for(const z of[-228,-180]){
+    const southeast=x===-96&&z===-180,high=southeast?44:34,top=3+high;
+    towers.push({x,z,height:high,top,southeast});
+    const rows=[];for(let y=13;y<top-2;y+=8)rows.push({y,h:2.55,w:1.05,centers:[0]});
+    for(const sign of[-1,1]){
+      wall('x',x,z+sign*5.85,13,3,top-.25,1.3,rows,sign,masonry);
+      wall('z',z,x+sign*5.85,13,3,top-.25,1.3,rows,sign,masonry);
+      // Thin stringcourses and chamfer-like successive cap layers add actual
+      // shadow geometry while staying within the original fourteen-metre cap.
+      for(let y=11;y<top-2;y+=8){slab(x,z+sign*6.53,13.2,.24,y,.18);slab(x+sign*6.53,z,.24,13.2,y,.18);}
+    }
+    for(const y of[11,19,27,35,43])if(y<top-2)slab(x,z,10.8,10.8,y,.22,roofParts,mats.stoneDark);
+    const ring=(outer,y,h)=>{const inner=11.3,t=(outer-inner)/2;for(const sign of[-1,1]){slab(x,z+sign*(inner/2+t/2),outer,t,y,h);slab(x+sign*(inner/2+t/2),z,t,inner,y,h);}};
+    ring(13.35,top-.15,.3);ring(13.75,top+.12,.22);ring(14,top+.37,.28);
+    slab(x,z,11.3,11.3,top+.54,.15,roofParts,mats.pavement);
+    // Continuous parapet and distinct merlons, with corner duplicates removed.
+    for(const sign of[-1,1]){box(staticParts,x,top+.95,z+sign*6.45,13.3,.8,.5,mats.stoneLight);box(staticParts,x+sign*6.45,top+.95,z,.5,.8,12.5,mats.stoneLight);}
+    const merlons=new Set();for(let a=-6;a<=6;a+=3)for(const pos of[[a,-6],[a,6],[-6,a],[6,a]]){const key=pos.join(',');if(merlons.has(key))continue;merlons.add(key);box(staticParts,x+pos[0],top+1.75,z+pos[1],1.4,1.5,1.4,mats.stoneLight);}
+  }
+  // Flush geometry into a small number of material draws per semantic parent.
+  let triangles=0,drawCalls=0,finite=true;
+  for(const[parent,byMaterial]of batches)for(const[material,b]of byMaterial){if(!b.p.length)continue;for(const a of[b.p,b.n,b.uv])for(const value of a)if(!Number.isFinite(value))finite=false;const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(b.p,3));g.setAttribute('normal',new T.Float32BufferAttribute(b.n,3));g.setAttribute('uv',new T.Float32BufferAttribute(b.uv,2));g.computeBoundingBox();g.computeBoundingSphere();const m=new T.Mesh(g,material);m.name=parent===roofParts?'Removable Antonia terrace and upper floors':'Dressed Antonia architecture, courts and passage reveals';m.castShadow=m.receiveShadow=true;parent.add(m);triangles+=b.p.length/9;drawCalls++;}
+  unitBox.dispose();world.updateMatrixWorld(true);
+  const afterBounds=new T.Box3().setFromObject(antonia);
+  const bounds=b=>({min:b.min.toArray(),max:b.max.toArray(),size:b.getSize(new T.Vector3()).toArray()});
+  const result={finite,triangles,drawCalls,arcadeInfillPiers,permanentWallTop:wallTop,towers:towers.length,towerHeights:towers.map(t=>({southeast:t.southeast,height:t.height})),beforeBounds:bounds(beforeBounds),bounds:bounds(afterBounds),removableRoofGroups:1};
+  antonia.userData.architectureV2=result;
+  return result;
+}
+
+/* Sculptural colonnades for the Herodian-period interpretive reconstruction.
+ * Jerusalem's smooth-leaf Corinthian morphology, two crowns of eight leaves,
+ * and Attic bases with two tori inform these details. Sources: the discussion
+ * and opposing addenda in IMSA 8 (2016–17), pp. 74–95, particularly pp.90,92,94.
+ * The Royal Stoa attribution and exact capital form remain interpretive.
+ * Run after enhanceTempleArchitecture; all units are metres. */
+function enrichTempleColonnades(T, ctx) {
+  const { world, mats, instance } = ctx;
+  if (world.userData.colonnadeDetailV2) return world.userData.colonnadeDetailV2;
+  const initial = [];
+  world.traverse(o => { if (o.isMesh) initial.push(o); });
+  const tris = g => (g.index ? g.index.count : g.attributes.position.count) / 3;
+  const countObject = o => tris(o.geometry) * (o.isInstancedMesh ? o.count : 1);
+  const before = initial.reduce((n,o) => n + countObject(o),0);
+  const matrix = new T.Matrix4(), position = new T.Vector3(), rotation = new T.Quaternion(), scale = new T.Vector3();
+  const columns = [];
+  const oldNames = new Set(['Tapered limestone shafts with carved flutes','Curved ribbed acanthus leaves','Turned torus and scotia base moldings','Sculpted Corinthian capital bells','Corinthian capital corner scrolls']);
+  const batch = (parent,g,material,entries,name) => {
+    if (!entries.length) return null;
+    const m = instance(parent,g,material,entries); m.name=name;
+    m.instanceMatrix.needsUpdate=true; m.computeBoundingSphere(); return m;
+  };
+  function mergeParts(parts) {
+    const positions=[],normals=[],uvs=[];
+    for(const {geometry,transform} of parts){
+      const g=geometry.index?geometry.toNonIndexed():geometry.clone();
+      if(transform)g.applyMatrix4(transform);
+      if(!g.attributes.normal)g.computeVertexNormals();
+      const p=g.attributes.position,n=g.attributes.normal,u=g.attributes.uv;
+      for(let i=0;i<p.count;i++){
+        positions.push(p.getX(i),p.getY(i),p.getZ(i));normals.push(n.getX(i),n.getY(i),n.getZ(i));
+        uvs.push(u?u.getX(i):0,u?u.getY(i):0);
+      }
+      g.dispose();
+    }
+    const out=new T.BufferGeometry();
+    out.setAttribute('position',new T.Float32BufferAttribute(positions,3));
+    out.setAttribute('normal',new T.Float32BufferAttribute(normals,3));
+    out.setAttribute('uv',new T.Float32BufferAttribute(uvs,2));out.computeBoundingSphere();out.computeBoundingBox();
+    return out;
+  }
+  function transform(x=0,y=0,z=0,rx=0,ry=0,rz=0,sx=1,sy=1,sz=1){
+    const o=new T.Object3D();o.position.set(x,y,z);o.rotation.set(rx,ry,rz);o.scale.set(sx,sy,sz);o.updateMatrix();return o.matrix;
+  }
+  function lathe(profile,segments){return new T.LatheGeometry(profile.map(([r,y])=>new T.Vector2(r,y)),segments);}
+  const quality={
+    high:{shaftR:72,shaftY:8,flutes:24,leafU:9,leafV:8,latheR:32,voluteU:20,voluteV:5,abacus:8},
+    medium:{shaftR:48,shaftY:4,flutes:16,leafU:5,leafV:5,latheR:20,voluteU:12,voluteV:4,abacus:4},
+    low:{shaftR:24,shaftY:2,flutes:12,leafU:3,leafV:3,latheR:10,voluteU:5,voluteV:3,abacus:2}
+  };
+  const baseProfile=[
+    [1.27,.245],[1.32,.265],[1.37,.305],[1.395,.365],[1.39,.425],[1.35,.48],
+    [1.29,.51],[1.26,.535],[1.14,.57],[1.065,.625],[1.025,.69],[1.025,.74],
+    [1.065,.795],[1.14,.84],[1.195,.875],[1.225,.93],[1.22,.985],[1.19,1.035],
+    [1.13,1.07],[1.075,1.09],[1.03,1.115],[1.0,1.16]
+  ];
+  const bellProfile=[[.83,0],[.84,.08],[.845,.22],[.87,.45],[.94,.74],[1.025,1.02],[1.1,1.32],[1.15,1.56],[1.2,1.79]];
+
+  // These are closed, thick, curled stone leaves. The oval section wraps a
+  // curved centerline; the back and rounded margins are modeled as well as
+  // the gently raised central rib. Smooth margins avoid generic serrated
+  // foliage that would obscure the characteristic Jerusalem treatment.
+  function smoothLeaf(q,height,width,curl=.40,flare=.21){
+    const p=[],uv=[],indices=[];
+    const center=t=>{
+      const a=1-t;
+      return {y:height*(3*a*a*t*.72+3*a*t*t*1.15+t*t*t*.95),
+        z:3*a*a*t*(-.03)+3*a*t*t*.16+t*t*t*curl+flare*t*(1-t*.5),
+        dy:height*(3*a*a*.72+6*a*t*(1.15-.72)+3*t*t*(.95-1.15)),
+        dz:3*a*a*(-.03)+6*a*t*(.16+.03)+3*t*t*(curl-.16)+flare*(1-t)};
+    };
+    for(let i=0;i<=q.leafU;i++){
+      const t=i/q.leafU,c=center(t),inv=1/Math.hypot(c.dy,c.dz),ny=-c.dz*inv,nz=c.dy*inv;
+      const envelope=Math.pow(Math.max(0,Math.sin(Math.PI*t)),.72);
+      const w=Math.max(.004,width*envelope),thick=.045*(.3+.7*envelope);
+      for(let j=0;j<=q.leafV;j++){
+        const a=j/q.leafV*Math.PI*2,sn=Math.sin(a),cs=Math.cos(a);
+        const rib=.035*Math.pow(Math.max(0,cs),5)*envelope;
+        const normal=(cs*thick+rib);
+        p.push(sn*w,c.y+ny*normal,c.z+nz*normal);uv.push(j/q.leafV,t);
+      }
+    }
+    const stride=q.leafV+1;
+    for(let i=0;i<q.leafU;i++)for(let j=0;j<q.leafV;j++){
+      const a=i*stride+j,b=a+stride;indices.push(a,a+1,b,a+1,b+1,b);
+    }
+    // Root and tip caps are independent rings, making the leaf a true solid.
+    const rootCenter=p.length/3;p.push(0,0,0);uv.push(.5,0);
+    const tip=center(1),tipCenter=p.length/3;p.push(0,tip.y,tip.z);uv.push(.5,1);
+    for(let j=0;j<q.leafV;j++){indices.push(rootCenter,j+1,j);const a=q.leafU*stride+j;indices.push(tipCenter,a,a+1);}
+    const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(p,3));g.setAttribute('uv',new T.Float32BufferAttribute(uv,2));g.setIndex(indices);g.computeVertexNormals();
+    // Keep the UV seam smooth; it is not a visible crease in carved stone.
+    const n=g.attributes.normal;
+    for(let row=0;row<=q.leafU;row++){const a=row*stride,b=a+q.leafV,v=new T.Vector3(n.getX(a)+n.getX(b),n.getY(a)+n.getY(b),n.getZ(a)+n.getZ(b)).normalize();n.setXYZ(a,v.x,v.y,v.z);n.setXYZ(b,v.x,v.y,v.z);}
+    return g;
+  }
+  function shaftGeometry(q,height){
+    const p=[],uv=[],index=[],stride=q.shaftR+1;
+    for(let row=0;row<=q.shaftY;row++){
+      const t=row/q.shaftY,bodyRadius=1-.18*t+.026*Math.sin(Math.PI*t);
+      for(let j=0;j<=q.shaftR;j++){
+        const a=j/q.shaftR*Math.PI*2;
+        const flute=.028*(.5+.5*Math.cos(a*q.flutes));
+        const r=bodyRadius*(1-flute);
+        p.push(Math.sin(a)*r,t*height,Math.cos(a)*r);uv.push(j/q.shaftR,t);
+      }
+    }
+    for(let row=0;row<q.shaftY;row++)for(let j=0;j<q.shaftR;j++){const a=row*stride+j,b=a+stride;index.push(a,a+1,b,b,a+1,b+1);}
+    const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(p,3));g.setAttribute('uv',new T.Float32BufferAttribute(uv,2));g.setIndex(index);g.computeVertexNormals();
+    const n=g.attributes.normal;
+    for(let row=0;row<=q.shaftY;row++){const a=row*stride,b=a+q.shaftR,v=new T.Vector3(n.getX(a)+n.getX(b),n.getY(a)+n.getY(b),n.getZ(a)+n.getZ(b)).normalize();n.setXYZ(a,v.x,v.y,v.z);n.setXYZ(b,v.x,v.y,v.z);}
+    return g;
+  }
+  // A concave four-sided abacus is swept through a cyma/ovolo section. It has
+  // actual cut corners and a recessed face rather than stacked square slabs.
+  function abacusGeometry(q){
+    const detail=q===quality.high?'high':q===quality.medium?'medium':'low';
+    const section=detail==='high'?[[0,1.79],[.0,1.82],[.045,1.86],[.058,1.90],[.045,1.93],[.025,1.955],[.025,1.99],[.085,2.015],[.112,2.065],[.116,2.115],[.10,2.16]]:
+      detail==='medium'?[[0,1.79],[.055,1.88],[.025,1.955],[.085,2.015],[.115,2.10],[.10,2.16]]:[[0,1.79],[.045,1.94],[.115,2.10],[.10,2.16]];
+    const contour=[];
+    for(let side=0;side<4;side++)for(let j=0;j<=q.abacus;j++){
+      const t=j/q.abacus,x=-1.36+.10+t*(2.72-.20),z=-1.36+.22*Math.sin(Math.PI*t);
+      const a=side*Math.PI/2;contour.push([x*Math.cos(a)-z*Math.sin(a),x*Math.sin(a)+z*Math.cos(a)]);
+    }
+    const p=[],uv=[],index=[],count=contour.length;
+    for(const [outset,y]of section)for(const[x,z]of contour){const f=(1.36+outset)/1.36;p.push(x*f,y,z*f);uv.push(x,z);}
+    for(let row=0;row<section.length-1;row++)for(let j=0;j<count;j++){const k=(j+1)%count,a=row*count+j,b=row*count+k,c=a+count,d=b+count;index.push(a,c,b,b,c,d);}
+    const bottomCenter=p.length/3;p.push(0,section[0][1],0);uv.push(.5,.5);
+    const topCenter=p.length/3;p.push(0,section.at(-1)[1],0);uv.push(.5,.5);
+    const top=(section.length-1)*count;
+    for(let j=0;j<count;j++){const k=(j+1)%count;index.push(bottomCenter,j,k,topCenter,top+k,top+j);}
+    const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(p,3));g.setAttribute('uv',new T.Float32BufferAttribute(uv,2));g.setIndex(index);g.computeVertexNormals();return g;
+  }
+  function spiral(q,small=false){
+    const points=[],radius=small?.16:.29,cy=small?1.69:1.62,radial=small?1.18:1.29;
+    if(!small){points.push(new T.Vector3(-.17,.94,1.03),new T.Vector3(-.07,1.21,1.17));}
+    const samples=q.voluteU;
+    for(let i=0;i<=samples;i++){
+      const t=i/samples,a=-Math.PI/2+t*Math.PI*2.35,r=.025+radius*Math.pow(1-t,.80);
+      points.push(new T.Vector3(Math.cos(a)*r,cy+Math.sin(a)*r,radial+.06*t));
+    }
+    const curve=new T.CatmullRomCurve3(points);
+    // Angularly spaced spiral controls need parameter-space sampling. Uniform
+    // arc-length sampling spends most vertices on the outer sweep and leaves
+    // a visibly polygonal inner eye, even at the high-detail setting.
+    curve.getPointAt=function(u,target){return this.getPoint(u,target);};
+    curve.getTangentAt=function(u,target){return this.getTangent(u,target);};
+    const g=new T.TubeGeometry(curve,q.voluteU,small?.035:.052,q.voluteV,false);
+    // Close the stone scrolls. Uncapped tubes would read as hollow pipes when
+    // the spiral eye is inspected from the side.
+    const p=Array.from(g.attributes.position.array),n=Array.from(g.attributes.normal.array),uv=Array.from(g.attributes.uv.array),index=Array.from(g.index.array),stride=q.voluteV+1;
+    for(const end of [0,1]){
+      const c=curve.getPointAt(end),normal=curve.getTangentAt(end).multiplyScalar(end?1:-1),center=p.length/3,offset=end?q.voluteU*stride:0;
+      p.push(c.x,c.y,c.z);n.push(normal.x,normal.y,normal.z);uv.push(.5,.5);
+      const a=new T.Vector3().fromArray(p,offset*3).sub(c),b=new T.Vector3().fromArray(p,(offset+1)*3).sub(c),forward=a.cross(b).dot(normal)>0;
+      for(let j=0;j<q.voluteV;j++)if(forward)index.push(center,offset+j,offset+j+1);else index.push(center,offset+j+1,offset+j);
+    }
+    g.setAttribute('position',new T.Float32BufferAttribute(p,3));g.setAttribute('normal',new T.Float32BufferAttribute(n,3));g.setAttribute('uv',new T.Float32BufferAttribute(uv,2));g.setIndex(index);return g;
+  }
+  function plinth(q){
+    if(q===quality.low)return new T.BoxGeometry(2.8,.245,2.8).translate(0,.1225,0);
+    const s=new T.Shape(),a=1.4,r=.045;
+    s.moveTo(-a+r,-a);s.lineTo(a-r,-a);s.quadraticCurveTo(a,-a,a,-a+r);s.lineTo(a,a-r);s.quadraticCurveTo(a,a,a-r,a);s.lineTo(-a+r,a);s.quadraticCurveTo(-a,a,-a,a-r);s.lineTo(-a,-a+r);s.quadraticCurveTo(-a,-a,-a+r,-a);
+    const g=new T.ExtrudeGeometry(s,{depth:.20,bevelEnabled:true,bevelSegments:q===quality.high?3:2,steps:1,bevelSize:.018,bevelThickness:.018,curveSegments:q===quality.high?4:2});
+    g.rotateX(-Math.PI/2);g.translate(0,.022,0);return g;
+  }
+  const templateCache=new Map();
+  function columnTemplate(q,capitalTop){
+    const key=Object.keys(quality).find(k=>quality[k]===q)+':'+capitalTop.toFixed(6);
+    if(templateCache.has(key))return templateCache.get(key);
+    const capY=capitalTop-2.16,shaftY=1.12,shaftHeight=capY-shaftY+.025;
+    const parts=[],owned=new Set();
+    const add=(g,m)=>{parts.push({geometry:g,transform:m});owned.add(g);};
+    add(plinth(q));
+    const bp=q===quality.low?baseProfile.filter((_,i)=>[0,2,5,9,12,16,21].includes(i)):q===quality.medium?baseProfile.filter((_,i)=>i%2===0||i===21):baseProfile;
+    add(lathe(bp,q.latheR));
+    add(shaftGeometry(q,shaftHeight),transform(0,shaftY,0));
+    const bell=q===quality.low?bellProfile.filter((_,i)=>[0,3,6,8].includes(i)):bellProfile;
+    add(lathe(bell,q===quality.low?8:q.latheR),transform(0,capY,0));
+    // Two narrow astragals articulate the shaft/capital joint.
+    const neck=q===quality.low?[[.83,-.03],[.855,.015],[.835,.075]]:[[.83,-.055],[.84,-.035],[.86,.005],[.855,.035],[.835,.06],[.83,.10]];
+    add(lathe(neck,q===quality.low?8:q.latheR),transform(0,capY,0));
+    const lower=smoothLeaf(q,1.10,.36,.41,.21),upper=smoothLeaf(q,1.32,.39,.42,.43);
+    for(let crown=0;crown<2;crown++)for(let j=0;j<8;j++){
+      const angle=j*Math.PI/4+crown*Math.PI/8,r=crown?.87:.81,y=capY+(crown?.40:.055);
+      parts.push({geometry:crown?upper:lower,transform:transform(Math.sin(angle)*r,y,Math.cos(angle)*r,0,angle)});
+    }
+    owned.add(lower);owned.add(upper);
+    const large=spiral(q,false);owned.add(large);
+    for(let j=0;j<4;j++)parts.push({geometry:large,transform:transform(0,capY,0,0,Math.PI/4+j*Math.PI/2)});
+    if(q!==quality.low){const small=spiral(q,true);owned.add(small);for(let j=0;j<4;j++)parts.push({geometry:small,transform:transform(0,capY,0,0,j*Math.PI/2)});}
+    add(abacusGeometry(q),transform(0,capY,0));
+    const g=mergeParts(parts);g.name='Smooth-leaf Corinthian column — '+key;
+    for(const ownedGeometry of owned)ownedGeometry.dispose();templateCache.set(key,g);return g;
+  }
+
+  // All columns share three instanced detail tiers per architectural parent.
+  // A camera hook selects the nearest sculptures without one draw per column.
+  const shaftGroups=[];
+  const tierKeys=['high','medium','low'];
+  const shafts=initial.filter(m=>m.isInstancedMesh&&m.name==='Tapered limestone shafts with carved flutes');
+  let allLowTriangles=0;
+  for(const old of shafts){
+    const parent=old.parent,id=parent.userData.landmark,specs=[];
+    for(let i=0;i<old.count;i++){
+      old.getMatrixAt(i,matrix);matrix.decompose(position,rotation,scale);
+      const r=scale.x,h=scale.y+1.3,base=position.y-h/2,top=h+(id==='stoa'?-.35:id==='women'?.18:-.10);
+      const spec={id:columns.length,x:position.x,z:position.z,base,r,h,top,parent,worldCenter:new T.Vector3(),distance2:Infinity};
+      spec.localMatrix=transform(spec.x,spec.base,spec.z,0,0,0,r,r,r);
+      specs.push(spec);columns.push(spec);
+    }
+    for(const o of [...parent.children]){
+      if(oldNames.has(o.name)){parent.remove(o);continue;}
+      if(!o.isInstancedMesh||o.count!==old.count)continue;
+      o.getMatrixAt(0,matrix);matrix.decompose(position,rotation,scale);
+      const first=specs[0];
+      const isBase=Math.abs(scale.y-.32)<.01&&Math.abs(position.y-(first.base+.16))<.02;
+      const isAbacus=Math.abs(scale.y-.3)<.01&&Math.abs(position.y-(first.base+first.h-.15))<.02;
+      if(isBase||isAbacus)parent.remove(o);
+    }
+    const first=specs[0],capTop=first.top/first.r,state={parent,specs,meshes:{},membership:{high:[],medium:[],low:specs.map(s=>s.id)},worldMatrix:new T.Matrix4()};
+    parent.updateWorldMatrix(true,false);state.worldMatrix.copy(parent.matrixWorld);
+    for(const spec of specs)spec.worldCenter.set(spec.x,spec.base+spec.top/2,spec.z).applyMatrix4(parent.matrixWorld);
+    for(const key of tierKeys){
+      const geometry=columnTemplate(quality[key],capTop),capacity=key==='high'?Math.min(32,specs.length):specs.length;
+      const m=new T.InstancedMesh(geometry,mats.stoneLight,capacity);m.name='Instanced volumetric Corinthian colonnade — '+key;
+      m.userData.templeColumnBatch=true;m.userData.detailTier=key;m.castShadow=m.receiveShadow=true;
+      m.count=key==='low'?specs.length:0;m.visible=m.count>0;
+      if(key==='low'){for(let i=0;i<specs.length;i++)m.setMatrixAt(i,specs[i].localMatrix);m.instanceMatrix.needsUpdate=true;m.computeBoundingBox();m.computeBoundingSphere();allLowTriangles+=tris(geometry)*specs.length;}
+      else{m.boundingSphere=new T.Sphere(new T.Vector3(),0);m.boundingBox=new T.Box3(new T.Vector3(),new T.Vector3());}
+      state.meshes[key]=m;parent.add(m);
+    }
+    shaftGroups.push(state);
+  }
+  const lastCameraPosition=new T.Vector3(Infinity,Infinity,Infinity),cameraPosition=new T.Vector3();
+  const activeDetail={high:0,medium:0,low:columns.length,activeTriangles:allLowTriangles,changed:false,changedBatches:0,boundingSpheresFinite:true};
+  let result;
+  function updateTempleColumnDetail(camera){
+    activeDetail.changed=false;activeDetail.changedBatches=0;
+    if(!camera?.isCamera)return activeDetail;
+    camera.getWorldPosition(cameraPosition);
+    let transformed=false;
+    // Only the five shaft parents are visited; the full scene is not traversed.
+    for(const state of shaftGroups){
+      state.parent.updateWorldMatrix(true,false);
+      if(!state.worldMatrix.equals(state.parent.matrixWorld)){
+        transformed=true;state.worldMatrix.copy(state.parent.matrixWorld);
+        for(const spec of state.specs)spec.worldCenter.set(spec.x,spec.base+spec.top/2,spec.z).applyMatrix4(state.parent.matrixWorld);
+      }
+    }
+    if(!transformed&&cameraPosition.equals(lastCameraPosition))return activeDetail;
+    lastCameraPosition.copy(cameraPosition);
+    activeDetail.changed=transformed;
+    const near=[];
+    for(const spec of columns){spec.distance2=spec.worldCenter.distanceToSquared(cameraPosition);if(spec.distance2<45*45)near.push(spec);}
+    near.sort((a,b)=>a.distance2-b.distance2||a.id-b.id);
+    const highIds=new Set(near.slice(0,32).map(s=>s.id));
+    let high=0,medium=0,low=0,activeTriangles=0,boundsFinite=true;
+    for(const state of shaftGroups){
+      const members={high:[],medium:[],low:[]};
+      for(const spec of state.specs){const key=highIds.has(spec.id)?'high':spec.distance2<110*110?'medium':'low';members[key].push(spec);}
+      for(const key of tierKeys){
+        const chosen=members[key],previous=state.membership[key],mesh=state.meshes[key];
+        const changed=previous.length!==chosen.length||chosen.some((s,i)=>s.id!==previous[i]);
+        if(changed){
+          state.membership[key]=chosen.map(s=>s.id);mesh.count=chosen.length;mesh.visible=chosen.length>0;
+          for(let i=0;i<chosen.length;i++)mesh.setMatrixAt(i,chosen[i].localMatrix);
+          mesh.instanceMatrix.needsUpdate=true;
+          if(chosen.length){mesh.computeBoundingBox();mesh.computeBoundingSphere();}
+          else{mesh.boundingSphere.set(new T.Vector3(),0);mesh.boundingBox.set(new T.Vector3(),new T.Vector3());}
+          activeDetail.changed=true;activeDetail.changedBatches++;
+        }
+        const sphere=mesh.boundingSphere;
+        if(!sphere||![sphere.center.x,sphere.center.y,sphere.center.z,sphere.radius].every(Number.isFinite))boundsFinite=false;
+        activeTriangles+=tris(mesh.geometry)*mesh.count;
+      }
+      high+=members.high.length;medium+=members.medium.length;low+=members.low.length;
+    }
+    Object.assign(activeDetail,{high,medium,low,activeTriangles,boundingSpheresFinite:boundsFinite});
+    if(result){result.activeDetail=activeDetail;result.activeAddedTriangles=result.addedDistantTriangles+activeTriangles-allLowTriangles;}
+    return activeDetail;
+  }
+
+  // A true profiled eave replaces the earlier stack of thin flat strips.
+  function eaveSweep(length,axis,spanEdge,baseY,sign,material,parent){
+    const section=[[0,0],[.025,.03],[.08,.07],[.115,.13],[.12,.19],[.095,.235],[.045,.265],[.04,.29],[.24,.29],[.24,.36],[.29,.39],[.34,.445],[.35,.51],[.30,.55],[0,.55]];
+    const p=[],uv=[],idx=[];
+    for(let end=0;end<2;end++)for(const[outset,y]of section){
+      const u=(end-.5)*length,v=spanEdge+sign*outset;
+      p.push(axis==='x'?u:v,baseY+y,axis==='x'?v:u);uv.push(u,y);
+    }
+    const n=section.length;
+    const flip=axis==='x'?sign>0:sign<0;
+    for(let j=0;j<n;j++){const k=(j+1)%n;if(flip)idx.push(j,j+n,k,k,j+n,k+n);else idx.push(j,k,j+n,k,k+n,j+n);}
+    const caps=T.ShapeUtils.triangulateShape(section.map(([x,y])=>new T.Vector2(x,y)),[]);
+    for(const end of [0,1])for(const face of caps){
+      const [a,b,c]=face.map(i=>i+end*n),pa=new T.Vector3().fromArray(p,a*3),pb=new T.Vector3().fromArray(p,b*3),pc=new T.Vector3().fromArray(p,c*3);
+      const normal=pb.sub(pa).cross(pc.sub(pa)),outward=(axis==='x'?normal.x:normal.z)*(end?1:-1)>0;
+      if(outward)idx.push(a,b,c);else idx.push(a,c,b);
+    }
+    const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(p,3));g.setAttribute('uv',new T.Float32BufferAttribute(uv,2));g.setIndex(idx);g.computeVertexNormals();
+    // The profiled fascia has solid end caps as well as its carved long face.
+    const m=new T.Mesh(g,material);m.name='Continuous carved ovolo and cyma eave profile';m.castShadow=m.receiveShadow=true;parent.add(m);return m;
+  }
+  let profiledEaves=0,leanToRoofs=0;
+  const rootRoofs=[];world.traverse(o=>{if(o.isMesh&&o.material===mats.roof&&o.geometry.parameters?.width&&['outer','stoa'].includes(o.parent?.userData.landmark))rootRoofs.push(o);});
+  for(const roof of rootRoofs){
+    const d=roof.geometry.parameters;
+    const isSide=roof.parent.userData.landmark==='stoa'&&(Math.abs(roof.position.z-193)<.01||Math.abs(roof.position.z-215)<.01);
+    if(isSide)continue;
+    const assembly=roof.children.find(g=>g.name==='Pitched terracotta roof, tiled eaves and timber ceiling');
+    if(!assembly)continue;
+    for(const old of [...assembly.children])if(old.name==='Profiled stone cornices and recessed dentils')assembly.remove(old);
+    const alongX=d.width>d.depth,length=Math.max(d.width,d.depth),span=Math.min(d.width,d.depth),eave=d.height/2+(roof.parent.userData.landmark==='outer'?.4:.12);
+    for(const sign of [-1,1]){eaveSweep(length+.6,alongX?'x':'z',sign*span/2,eave-.77,sign,mats.stoneLight,assembly);profiledEaves++;}
+  }
+
+  // Basilica side aisles are lean-to roofs abutting the raised nave, rather
+  // than two additional small gables. Their exact pitch remains interpretive.
+  function leanTo(roof){
+    const north=roof.position.z<204,lowZ=north?-6.6:6.6,highZ=north?5.3:-5.3;
+    const lowY=19.0-roof.position.y,highY=21.2-roof.position.y,length=285.6,thickness=.18;
+    const yAt=z=>lowY+(z-lowZ)/(highZ-lowZ)*(highY-lowY);
+    const z0=Math.min(lowZ,highZ),z1=Math.max(lowZ,highZ),y0=yAt(z0),y1=yAt(z1),a=length/2;
+    const p=[-a,y0,z0,a,y0,z0,a,y1,z1,-a,y1,z1,-a,y0-thickness,z0,a,y0-thickness,z0,a,y1-thickness,z1,-a,y1-thickness,z1];
+    const index=[0,2,1,0,3,2,4,5,6,4,6,7,0,1,5,0,5,4,1,2,6,1,6,5,2,3,7,2,7,6,3,0,4,3,4,7];
+    const base=new T.BufferGeometry();base.setAttribute('position',new T.Float32BufferAttribute(p,3));base.setIndex(index);
+    const g=base.toNonIndexed();base.dispose();g.computeVertexNormals();g.setAttribute('uv',new T.Float32BufferAttribute(new Float32Array(g.attributes.position.count*2),2));g.computeBoundingSphere();
+    g.parameters={width:length,height:highY-lowY+thickness,depth:Math.abs(highZ-lowZ)};roof.geometry=g;
+    for(const child of [...roof.children])if(child.name==='Pitched terracotta roof, tiled eaves and timber ceiling')roof.remove(child);
+    const assembly=new T.Group();assembly.name='Sloping basilica aisle roof with timber underside and clay eaves';roof.add(assembly);
+    const sign=north?-1:1;
+    eaveSweep(length,'x',lowZ,lowY-.70,sign,mats.stoneLight,assembly);profiledEaves++;
+    const slope=Math.atan((highY-lowY)/(highZ-lowZ)),span=Math.abs(highZ-lowZ),centerZ=(lowZ+highZ)/2,centerY=(lowY+highY)/2;
+    const beams=[],coffers=[];
+    for(let x=-141.5;x<142;x+=3.7){
+      beams.push([x,centerY-.28,centerZ,.18,.28,span/Math.cos(slope),-slope]);
+      for(let j=0;j<4;j++){const z=z0+(j+.5)*span/4;coffers.push([x,yAt(z)-.205,z,3.35,.02,span/4-.18,-slope]);}
+    }
+    batch(assembly,new T.BoxGeometry(1,1,1),mats.wood,beams,'Sloping cedar roof rafters');
+    const panel=new T.PlaneGeometry(1,1);panel.rotateX(Math.PI/2);batch(assembly,panel,mats.wood,coffers,'Recessed sloping cedar ceiling panels');
+    // Rounded eave imbrices run up the slope; the material continues tile
+    // joints across the remaining field. There is no ridge on a lean-to roof.
+    const hp=[],huv=[],hi=[];
+    for(let u=0;u<2;u++)for(let j=0;j<=4;j++){const t=j/4*Math.PI;hp.push(0.13*Math.cos(t),.105*Math.sin(t),u-.5);huv.push(j/4,u);}
+    for(let j=0;j<4;j++)hi.push(j,j+1,j+5,j+1,j+6,j+5);
+    const hg=new T.BufferGeometry();hg.setAttribute('position',new T.Float32BufferAttribute(hp,3));hg.setAttribute('uv',new T.Float32BufferAttribute(huv,2));hg.setIndex(hi);hg.computeVertexNormals();
+    const channels=[],strip=2.4,zc=lowZ+(north?1:-1)*strip/2;
+    for(let x=-142;x<142;x+=.57)channels.push([x,yAt(zc)+.025,zc,1,1,strip/Math.cos(slope),-slope]);
+    batch(assembly,hg,mats.roof,channels,'Hollow rounded clay eave tiles on lean-to pitch');leanToRoofs++;
+  }
+  for(const roof of rootRoofs)if(roof.parent.userData.landmark==='stoa'&&(Math.abs(roof.position.z-193)<.01||Math.abs(roof.position.z-215)<.01))leanTo(roof);
+  const stoa=world.children.find(g=>g.userData.landmark==='stoa');
+  if(stoa)batch(stoa,new T.BoxGeometry(1,1,1),mats.stoneLight,[[0,19.4,198,283,.5,1],[0,19.4,210,283,.5,1]],'Clerestory sill blocks seated continuously on the architrave');
+
+  // Snapshot the initial all-distant scene. Tier templates are shared, while
+  // runtime diagnostics report the actual active triangles for the camera.
+  let after=0,finite=true,draws=0;
+  const seen=new Set();
+  world.traverse(o=>{if(o.isMesh){after+=countObject(o);draws++;const g=o.geometry;if(!seen.has(g)){seen.add(g);for(const key of ['position','normal']){const attr=g.attributes[key];if(attr)for(const n of attr.array)if(!Number.isFinite(n))finite=false;}}}});
+  const templates=[...templateCache.values()];
+  const allHigh=columns.map(spec=>({gain:tris(columnTemplate(quality.high,spec.top/spec.r))-tris(columnTemplate(quality.medium,spec.top/spec.r)),medium:tris(columnTemplate(quality.medium,spec.top/spec.r))}));
+  const theoreticalColumnMaximum=allHigh.reduce((n,s)=>n+s.medium,0)+allHigh.map(s=>s.gain).sort((a,b)=>b-a).slice(0,32).reduce((a,b)=>a+b,0);
+  result={columns:columns.length,inspectableColumns:columns.length,maximumHighDetailColumns:32,dynamicInstancedLOD:true,volumetricLeavesPerCapital:16,leanToRoofs,profiledEaves,
+    addedDistantTriangles:Math.round(after-before),activeAddedTriangles:Math.round(after-before),addedNearUpperBoundTriangles:Math.round(after-before+theoreticalColumnMaximum-allLowTriangles),
+    storedTemplateTriangles:templates.reduce((n,g)=>n+tris(g),0),sceneMeshes:draws,finite,activeDetail,
+    capitalDetailView:{eye:[126,17.1,202.5],target:[123,16.7,199]},
+    source:'IMSA 8 (2016–17), pp.74–95; smooth-leaf form and Royal Stoa attribution remain interpretive'};
+  world.userData.updateTempleColumnDetail=updateTempleColumnDetail;
+  world.userData.colonnadeDetailV2=result;return result;
+}
+
+/* Navigation keeps physical input streams separate: a pinch is applied once,
+   and two touch points use a fixed baseline for simultaneous pan and zoom. */
+function templeWheelPixels(event, height, width=height) {
+  const unitX=event.deltaMode===1?16:event.deltaMode===2?Math.max(1,width):1;
+  const unitY=event.deltaMode===1?16:event.deltaMode===2?Math.max(1,height):1;
+  return {x:(Number.isFinite(event.deltaX)?event.deltaX:0)*unitX,y:(Number.isFinite(event.deltaY)?event.deltaY:0)*unitY};
+}
+// Make the floor constraint feasible even after panning the orbit target below
+// the floor and then zooming in. The polar interval must never be inverted.
+function templeConstrainCameraSphere(pose, lowest, limits={min:1.5,max:1800,minPhi:.025,maxPhi:Math.PI-.035}) {
+  const radius=Math.max(limits.min,Math.min(limits.max,pose.radius));
+  const targetY=Math.max(pose.targetY,lowest-radius*Math.cos(limits.minPhi));
+  const ratio=Math.max(-1,Math.min(1,(lowest-targetY)/radius));
+  const maxPhi=Math.max(limits.minPhi,Math.min(limits.maxPhi,Math.acos(ratio)));
+  const phi=Math.max(limits.minPhi,Math.min(maxPhi,pose.phi));
+  return {radius,targetY,phi};
+}
+// Narrow screens need more horizontal distance, without moving a low camera
+// underneath its floor when it is looking upward at the architecture.
+function templeFitCameraPreset(eye, target, fit=1, lowest=-24.75) {
+  const dx=(eye[0]-target[0])*fit,dz=(eye[2]-target[2])*fit;
+  const dy=(eye[1]-target[1])*(eye[1]<target[1]?1:fit);
+  const length=Math.hypot(dx,dy,dz),theta=Math.atan2(dx,dz);
+  const phi=length>1e-8?Math.acos(Math.max(-1,Math.min(1,dy/length))):.025;
+  const sphere=templeConstrainCameraSphere({radius:length,phi,targetY:target[1]},lowest);
+  const center=[target[0],sphere.targetY,target[2]],r=sphere.radius,p=sphere.phi;
+  return {eye:[center[0]+r*Math.sin(p)*Math.sin(theta),center[1]+r*Math.cos(p),center[2]+r*Math.sin(p)*Math.cos(theta)],target:center};
+}
+function templeGestureProjection(start, current, limits={min:1.5,max:1800}) {
+  const distance=Math.max(.001,Number.isFinite(current.distance)?current.distance:.001);
+  const wanted=start.radius*Math.max(.001,start.distance)/distance;
+  const radius=Math.max(limits.min,Math.min(limits.max,wanted));
+  const unit=2*Math.tan(start.fov*Math.PI/360)/Math.max(1,start.height);
+  const oldUnit=start.radius*unit,newUnit=radius*unit;
+  return {radius,right:(start.x-start.centerX)*oldUnit-(current.x-start.centerX)*newUnit,
+    up:-(start.y-start.centerY)*oldUnit+(current.y-start.centerY)*newUnit,clamped:radius!==wanted};
+}
+function createTemplePinchOwnership() {
+  let owner=null,until=0;
+  const active=(now)=>{if(owner!=='native'&&owner!=='pointers'&&now>=until)owner=null;return owner;};
+  return {
+    pointerStart(){owner='pointers';until=Infinity;},
+    pointerEnd(now){if(owner==='pointers'){owner='pointer-tail';until=now+180;}},
+    nativeStart(now){const o=active(now);if(o==='pointers'||o==='wheel'||o==='pointer-tail')return false;owner='native';until=Infinity;return true;},
+    nativeEnd(now){if(owner==='native'){owner='native-tail';until=now+180;}},
+    wheel(now){const o=active(now);if(o&&o!=='wheel')return false;owner='wheel';until=now+180;return true;},
+    blocksPan(now){const o=active(now);return Boolean(o);},
+    reset(){owner=null;until=0;}
+  };
+}
+function createTempleNavigation(T,options) {
+  const {canvas,camera,stage}=options, points=new Map(),ownership=createTemplePinchOwnership();
+  const listeners=[];let baseline=null,nativeBaseline=null,dragged=false,wasMultiple=false,firstDown=null,wheelTimer=null,changed=false;
+  const now=()=>performance.now();
+  const listen=(target,type,handler,settings)=>{target.addEventListener(type,handler,settings);listeners.push([target,type,handler,settings]);};
+  const basis=()=>({right:new T.Vector3(1,0,0).applyQuaternion(camera.quaternion),up:new T.Vector3(0,1,0).applyQuaternion(camera.quaternion)});
+  const touches=()=>[...points.entries()].filter(([,p])=>p.type==='touch').slice(0,2);
+  function sample(pair){const a=pair[0][1],b=pair[1][1];return{x:(a.x+b.x)/2,y:(a.y+b.y)/2,distance:Math.max(.001,Math.hypot(a.x-b.x,a.y-b.y))};}
+  function snapshot(x,y,distance,ids=null){const rect=canvas.getBoundingClientRect(),pose=options.getPose();return{...pose,target:pose.target.clone(),...basis(),x,y,distance,ids,centerX:rect.left+rect.width/2,centerY:rect.top+rect.height/2,height:rect.height,fov:camera.getEffectiveFOV()};}
+  function change(action){const before=options.getPose(),result=action(),after=options.getPose();if(['radius','theta','phi'].some(k=>before[k]!==after[k])||['x','y','z'].some(k=>before.target[k]!==after.target[k]))changed=true;return result;}
+  function commit(){if(changed){changed=false;options.onCommit();}}
+  function rebase(){const pair=touches();if(pair.length!==2){baseline=null;return;}const p=sample(pair);baseline=snapshot(p.x,p.y,p.distance,pair.map(([id])=>id));}
+  function commitSoon(){clearTimeout(wheelTimer);wheelTimer=setTimeout(()=>{wheelTimer=null;commit();},220);}
+  function applyProjected(start,current){const result=templeGestureProjection(start,current);const target=start.target.clone().addScaledVector(start.right,result.right).addScaledVector(start.up,result.up);const constrained=change(()=>options.applyPose({radius:result.radius,target}));if(result.clamped||constrained){if(start===nativeBaseline)nativeBaseline=snapshot(current.x,current.y,current.distance);else rebase();}}
+  function pan(dx,dy){const pose=options.getPose(),unit=2*pose.radius*Math.tan(camera.getEffectiveFOV()*Math.PI/360)/Math.max(1,stage.clientHeight),axes=basis();change(()=>options.applyPose({radius:pose.radius,target:pose.target.clone().addScaledVector(axes.right,-dx*unit).addScaledVector(axes.up,dy*unit)}));}
+  function zoom(factor,event){const rect=canvas.getBoundingClientRect(),x=Number.isFinite(event.clientX)?event.clientX:rect.left+rect.width/2,y=Number.isFinite(event.clientY)?event.clientY:rect.top+rect.height/2;const start=snapshot(x,y,1);applyProjected(start,{x,y,distance:1/factor});}
+  function clear(commitChanges=false){if(commitChanges)commit();changed=false;const ids=[...points.keys()];points.clear();baseline=null;nativeBaseline=null;firstDown=null;dragged=false;wasMultiple=false;ownership.reset();clearTimeout(wheelTimer);wheelTimer=null;for(const id of ids)try{if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}catch(e){}}
+  listen(canvas,'pointerdown',e=>{
+    if(e.pointerType==='mouse'&&e.button>2)return;e.preventDefault();change(options.onStart);
+    if(points.size===0){firstDown={x:e.clientX,y:e.clientY,time:now(),button:e.button,type:e.pointerType};dragged=false;wasMultiple=false;}
+    points.set(e.pointerId,{x:e.clientX,y:e.clientY,type:e.pointerType,button:e.button});try{canvas.setPointerCapture(e.pointerId);}catch(error){}
+    const pair=touches();if(pair.length===2){wasMultiple=true;dragged=true;nativeBaseline=null;ownership.pointerStart();rebase();}
+  },{passive:false});
+  listen(canvas,'pointermove',e=>{
+    const previous=points.get(e.pointerId);if(!previous)return;e.preventDefault();
+    const dx=e.clientX-previous.x,dy=e.clientY-previous.y;points.set(e.pointerId,{...previous,x:e.clientX,y:e.clientY});
+    if(firstDown&&Math.hypot(e.clientX-firstDown.x,e.clientY-firstDown.y)>4)dragged=true;
+    const pair=touches();
+    if(pair.length===2){
+      if(!baseline||baseline.ids.some((id,i)=>id!==pair[i][0]))rebase();
+      if(baseline&&baseline.ids.includes(e.pointerId))applyProjected(baseline,sample(pair));
+      dragged=true;wasMultiple=true;return;
+    }
+    if(previous.type==='mouse'&&(e.buttons&6||e.shiftKey))pan(dx,dy);
+    else change(()=>options.orbit(dx,dy));
+  },{passive:false});
+  function release(e,cancelled){
+    if(!points.has(e.pointerId))return;
+    const single=points.size===1,pairBefore=touches().length===2;points.delete(e.pointerId);
+    if(!cancelled&&single&&!dragged&&!wasMultiple&&firstDown&&(firstDown.type!=='mouse'||firstDown.button===0)&&now()-firstDown.time<600)options.onPick(e);
+    if(pairBefore){ownership.pointerEnd(now());baseline=null;dragged=true;wasMultiple=true;}
+    if(touches().length===2){ownership.pointerStart();rebase();}
+    if(points.size===0){firstDown=null;baseline=null;commit();}else dragged=true;
+  }
+  listen(canvas,'pointerup',e=>release(e,false));
+  listen(canvas,'pointercancel',e=>release(e,true));
+  listen(canvas,'lostpointercapture',e=>release(e,true));
+  listen(canvas,'contextmenu',e=>e.preventDefault());listen(canvas,'auxclick',e=>e.preventDefault());
+  listen(canvas,'wheel',e=>{
+    e.preventDefault();const delta=templeWheelPixels(e,stage.clientHeight,stage.clientWidth);change(options.onStart);
+    if(e.ctrlKey){if(!ownership.wheel(now()))return;nativeBaseline=null;zoom(Math.exp(Math.max(-100,Math.min(100,delta.y))*.01),e);}
+    else{if(ownership.blocksPan(now()))return;if(options.getMode()==='mouse')zoom(Math.exp(Math.max(-200,Math.min(200,delta.y))*.0018),e);else pan(-delta.x,-delta.y);}
+    commitSoon();
+  },{passive:false});
+  listen(canvas,'gesturestart',e=>{e.preventDefault();if(!ownership.nativeStart(now()))return;change(options.onStart);const rect=canvas.getBoundingClientRect();nativeBaseline=snapshot(Number.isFinite(e.clientX)?e.clientX:rect.left+rect.width/2,Number.isFinite(e.clientY)?e.clientY:rect.top+rect.height/2,1);},{passive:false});
+  listen(canvas,'gesturechange',e=>{e.preventDefault();if(!nativeBaseline||touches().length===2)return;const scale=Math.max(.001,Number.isFinite(e.scale)?e.scale:1);applyProjected(nativeBaseline,{x:nativeBaseline.x,y:nativeBaseline.y,distance:scale});},{passive:false});
+  listen(canvas,'gestureend',e=>{e.preventDefault();if(nativeBaseline){nativeBaseline=null;ownership.nativeEnd(now());commit();}},{passive:false});
+  listen(window,'blur',()=>clear(true));listen(document,'visibilitychange',()=>{if(document.hidden)clear(true);});
+  return {cancel:clear,dispose(){clear();for(const[target,type,handler,settings]of listeners)target.removeEventListener(type,handler,settings);}};
+}
+
+/* Sanctuary detail pass: interpretive carved classical profiles, rather than
+ * a claim that an intact sanctuary elevation survives. Josephus AJ 15.11 and
+ * the Israel Museum model inform the architectural language. The particular
+ * leaf carving, panel rosettes and profiles below are reconstruction choices.
+ * Call after buildSanctuary() and refineTempleSanctuary(). No layout changes.
+ */
+function enrichSanctuaryDetail(T, ctx) {
+  const { world, mats } = ctx;
+  let sanctuary;
+  world.traverse(object => {
+    if (object.isGroup && object.userData.landmark === 'sanctuary') sanctuary = object;
+  });
+  if (!sanctuary) return { error: 'Sanctuary group not found' };
+  if (sanctuary.userData.architecturalDetailV2) return sanctuary.userData.architecturalDetailV2;
+  const north = sanctuary.getObjectByName('North walls and chambers — removable for cutaway') || sanctuary;
+  // A dressed sanctuary face has shallow mortar reveals. The earlier 90 mm
+  // overlay made each small ashlar edge a dark tooth at normal viewing range.
+  // Retain the bond and joints, but seat the facing 12 mm proud of its wall;
+  // the central head and wings now share one dressed facade plane, with
+  // equally shallow joints on the two short porch return walls.
+  let dressedAshlarInstances = 0;
+  const ashlarMatrix = new T.Matrix4(), ashlarPosition = new T.Vector3();
+  const ashlarScale = new T.Vector3(), ashlarRotation = new T.Quaternion();
+  sanctuary.traverse(object => {
+    if (!object.isInstancedMesh || object.name !== 'Limestone ashlar courses') return;
+    let changed = false;
+    for (let i = 0; i < object.count; i++) {
+      object.getMatrixAt(i, ashlarMatrix);
+      ashlarMatrix.decompose(ashlarPosition, ashlarRotation, ashlarScale);
+      if (ashlarPosition.y < 8.4 || ashlarPosition.y > 55.4) continue;
+      const frontFace = Math.abs(ashlarScale.x-.09) < .001 && ashlarPosition.x >= -24.1 && ashlarPosition.x <= -23.8 && Math.abs(ashlarPosition.z) <= 25.1;
+      const porchReturn = Math.abs(ashlarScale.z-.09) < .001 && Math.abs(Math.abs(ashlarPosition.z)-25.045) < .01 && ashlarPosition.x >= -34.1 && ashlarPosition.x <= -23.9;
+      if (!frontFace && !porchReturn) continue;
+      if (frontFace) { ashlarPosition.x = -23.994; ashlarScale.x = .012; }
+      else { ashlarPosition.z = Math.sign(ashlarPosition.z)*25.006; ashlarScale.z = .012; }
+      ashlarMatrix.compose(ashlarPosition, ashlarRotation, ashlarScale);
+      object.setMatrixAt(i, ashlarMatrix);
+      dressedAshlarInstances++; changed = true;
+    }
+    if (changed) {
+      object.castShadow = false;
+      object.instanceMatrix.needsUpdate = true;
+      object.computeBoundingSphere(); object.computeBoundingBox();
+    }
+  });
+  const regions = [];
+  for (const sign of [-1, 1]) {
+    for (const z of [sign*11.4, sign*17.4, sign*23.3]) {
+      // Remove the original whole shaft, black painted flute strips, stepped
+      // base blocks, two cap boxes and torus-shaped scroll placeholders.
+      regions.push([-24.052,-23.248,10.248,44.852,z-.662,z+.662]);
+      regions.push([-23.231,-23.169,12.298,43.702,z-.45,z+.45]);
+      regions.push([-24.21,-22.70,10.19,11.81,z-1.11,z+1.11]);
+      regions.push([-24.31,-22.30,44.04,46.10,z-1.32,z+1.32]);
+    }
+    for (const z of [sign*14.4, sign*20.4]) {
+      regions.push([-24.00,-23.65,47.30,52.10,z-2.25,z+2.25]);
+    }
+  }
+  // Replace the spherical studs in the central gold frieze with real relief.
+  regions.push([-23.15,-23.00,41.20,41.80,-9.20,9.20]);
+  let removedTriangles = 0;
+  sanctuary.traverse(object => {
+    if (!object.isMesh || object.isInstancedMesh || object.name !== 'Baked architectural details') return;
+    const original = object.geometry;
+    const geometry = original.index ? original.toNonIndexed() : original;
+    const attributes = Object.keys(geometry.attributes).filter(key => ['position','normal','uv'].includes(key));
+    const arrays = Object.fromEntries(attributes.map(key => [key, []]));
+    const position = geometry.attributes.position;
+    object.updateMatrix();
+    const point = new T.Vector3();
+    let removed = 0;
+    for (let i = 0; i < position.count; i += 3) {
+      const points = [0,1,2].map(k => {
+        point.fromBufferAttribute(position, i+k).applyMatrix4(object.matrix);
+        return [point.x, point.y, point.z];
+      });
+      const omit = regions.some(r => points.every(p => p[0]>=r[0] && p[0]<=r[1] && p[1]>=r[2] && p[1]<=r[3] && p[2]>=r[4] && p[2]<=r[5]));
+      if (omit) { removed++; continue; }
+      for (const key of attributes) {
+        const a = geometry.attributes[key];
+        for (let k = 0; k < 3; k++) for (let n = 0; n < a.itemSize; n++) arrays[key].push(a.array[(i+k)*a.itemSize+n]);
+      }
+    }
+    if (removed) {
+      const replacement = new T.BufferGeometry();
+      for (const key of attributes) replacement.setAttribute(key, new T.Float32BufferAttribute(arrays[key], geometry.attributes[key].itemSize));
+      replacement.computeBoundingSphere(); replacement.computeBoundingBox();
+      object.geometry = replacement; original.dispose(); removedTriangles += removed;
+    }
+    if (geometry !== original) geometry.dispose();
+  });
+
+  // One draw per material for each cutaway parent. All geometry is local to
+  // its architectural group; no independent animation or runtime allocation.
+  const batches = new Map();
+  function append(parent, geometry, material, x=0, y=0, z=0, rotation=null, scale=null) {
+    if (!batches.has(parent)) batches.set(parent, new Map());
+    const byMaterial = batches.get(parent);
+    if (!byMaterial.has(material)) byMaterial.set(material, { position:[], normal:[], uv:[] });
+    const batch = byMaterial.get(material), transform = new T.Object3D();
+    transform.position.set(x,y,z);
+    if (rotation) transform.rotation.set(...rotation);
+    if (scale) transform.scale.set(...scale);
+    transform.updateMatrix();
+    const clone = geometry.index ? geometry.toNonIndexed() : geometry.clone();
+    clone.applyMatrix4(transform.matrix);
+    if (!clone.attributes.normal) clone.computeVertexNormals();
+    const p=clone.attributes.position, n=clone.attributes.normal, u=clone.attributes.uv;
+    for (let i=0;i<p.count;i++) {
+      batch.position.push(p.getX(i),p.getY(i),p.getZ(i));
+      batch.normal.push(n.getX(i),n.getY(i),n.getZ(i));
+      batch.uv.push(u?u.getX(i):0,u?u.getY(i):0);
+    }
+    clone.dispose(); geometry.dispose();
+  }
+  const block = (parent,x,y,z,w,h,d,material=mats.stoneLight) => append(parent,new T.BoxGeometry(w,h,d),material,x,y,z);
+  function surface(positions, indices, uvs) {
+    const geometry=new T.BufferGeometry();
+    geometry.setAttribute('position',new T.Float32BufferAttribute(positions,3));
+    geometry.setAttribute('uv',new T.Float32BufferAttribute(uvs,2));
+    geometry.setIndex(indices);geometry.computeVertexNormals();return geometry;
+  }
+
+  // Sweep a carved horizontal section around a slightly concave abacus plan.
+  // The concavity gives Corinthian corners their projection and silhouette.
+  function rectangularProfile(parent,x,y,z,width,depth,profile,concavity=0,material=mats.stoneLight) {
+    const positions=[],indices=[],uvs=[],sideSteps=6;
+    for(let side=0;side<4;side++) {
+      const start=positions.length/3;
+      for(let row=0;row<profile.length;row++) {
+        const [outset,rise]=profile[row];
+        const a=width/2+outset,b=depth/2+outset;
+        const corners=[[-a,-b],[a,-b],[a,b],[-a,b]];
+        for(let k=0;k<=sideSteps;k++) {
+          const t=k/sideSteps,first=corners[side],second=corners[(side+1)%4];
+          let px=first[0]*(1-t)+second[0]*t,pz=first[1]*(1-t)+second[1]*t;
+          const inset=Math.sin(t*Math.PI)*concavity;
+          if(side===0)pz+=inset;if(side===1)px-=inset;if(side===2)pz-=inset;if(side===3)px+=inset;
+          positions.push(px,rise,pz);uvs.push(t,row/(profile.length-1));
+        }
+      }
+      for(let row=0;row<profile.length-1;row++)for(let k=0;k<sideSteps;k++) {
+        const a=start+row*(sideSteps+1)+k,b=a+1,c=a+sideSteps+1,d=c+1;
+        indices.push(a,c,b,b,c,d);
+      }
+    }
+    append(parent,surface(positions,indices,uvs),material,x,y,z);
+  }
+
+  // The front face is genuinely fluted. Five concave channels terminate in
+  // softly rounded heads and feet; their shadows do not depend on dark decals.
+  function flutedPilaster(parent,z) {
+    const bottom=11.94,height=31.82,front=-23.12,half=.66;
+    block(parent,-23.68,bottom+height/2,z,.75,height,half*2);
+    const samples=[-half,-.605];
+    for(const center of [-.48,-.24,0,.24,.48]) {
+      for(let j=0;j<=10;j++) samples.push(center-.095+j*.019);
+    }
+    samples.push(.605,half);samples.sort((a,b)=>a-b);
+    const ys=[0,.08,.18,.32,.50,.74,1.03,1.4,height-1.4,height-1.03,height-.74,height-.5,height-.32,height-.18,height-.08,height];
+    const positions=[],indices=[],uvs=[];
+    for(let row=0;row<ys.length;row++) {
+      const y=ys[row],v=Math.min(1,y/1.03,(height-y)/1.03),envelope=Math.sin(v*Math.PI/2);
+      for(const s of samples) {
+        let depth=0;
+        for(const center of [-.48,-.24,0,.24,.48]) {
+          const q=Math.abs(s-center)/.095;
+          if(q<1)depth=Math.max(depth,.105*Math.sqrt(1-q*q)*envelope);
+        }
+        positions.push(front-depth,bottom+y,z+s);uvs.push((s+half)/(half*2),y/height);
+      }
+    }
+    for(let row=0;row<ys.length-1;row++)for(let k=0;k<samples.length-1;k++) {
+      const a=row*samples.length+k,b=a+1,c=a+samples.length,d=c+1;
+      // East-facing facade, +X normal.
+      indices.push(a,c,b,b,c,d);
+    }
+    append(parent,surface(positions,indices,uvs),mats.stoneLight);
+    // Narrow return faces meet the rear shaft block with a dressed arris.
+    block(parent,-23.20,bottom+height/2,z-half+.025,.18,height,.05);
+    block(parent,-23.20,bottom+height/2,z+half-.025,.18,height,.05);
+    const baseProfile=[[-.04,0],[.12,0],[.12,.12],[.08,.18],[.03,.22],[.00,.28],[-.02,.34],[.01,.40],[.08,.47],[.15,.53],[.18,.60],[.18,.69],[.13,.76],[.04,.83],[.00,.88],[.00,.96],[-.04,.96],[-.04,0]];
+    rectangularProfile(parent,-23.64,10.98,z,.96,1.59,baseProfile);
+    rectangularProfile(parent,-23.64,10.30,z,1.18,1.96,[[0,0],[0,.20],[-.04,.25],[-.1,.31],[-.1,.43],[-.07,.51],[.02,.58],[.04,.64],[-.07,.68],[-.1,.68],[-.1,0]]);
+    rectangularProfile(parent,-23.64,43.70,z,.97,1.53,[[-.03,0],[.02,0],[.07,.04],[.10,.10],[.07,.16],[.02,.20],[.02,.27],[-.03,.27],[-.03,0]]);
+  }
+
+  // Smooth-leaf capital: a flared bell, two offset leaf ranks, cauliculi and
+  // actual spiral scrolls. Leaves curve away from the bell and turn at the tip;
+  // a raised central rib catches light across the carved blade.
+  function capital(parent,z) {
+    const cx=-23.69,base=43.95;
+    const bell=[new T.Vector2(.76,0),new T.Vector2(.77,.10),new T.Vector2(.81,.34),new T.Vector2(.88,.73),new T.Vector2(1.0,1.15),new T.Vector2(1.12,1.54)];
+    append(parent,new T.LatheGeometry(bell,28),mats.stoneLight,cx,base,z,null,[.58,1,.81]);
+    function leaf(angle,leafBase,height,halfWidth,rank) {
+      const positions=[],indices=[],uvs=[],rows=12,columns=8;
+      for(let row=0;row<=rows;row++) {
+        const t=row/rows;
+        const width=halfWidth*(.12+.88*Math.pow(Math.sin(Math.PI*t),.72));
+        const bend=Math.pow(Math.max(0,(t-.77)/.23),2);
+        const y=leafBase+height*(t-.16*bend);
+        const bellRadius=.77+.35*Math.min(1,(y-base)/1.54);
+        for(let column=0;column<=columns;column++) {
+          const u=column/columns*2-1,a=angle+u*width;
+          const rib=.07*Math.pow(1-Math.abs(u),1.6)*Math.sin(Math.PI*t);
+          const lobe=.018*Math.cos(u*Math.PI*3)*Math.sin(Math.PI*t);
+          const projection=.028+.10*Math.sin(Math.PI*t)+.29*Math.pow(t,5)+rib+lobe;
+          const r=bellRadius+projection;
+          positions.push(cx+Math.cos(a)*r*.58,y,z+Math.sin(a)*r*.81);
+          uvs.push((u+1)/2,t);
+        }
+      }
+      for(let row=0;row<rows;row++)for(let column=0;column<columns;column++) {
+        const a=row*(columns+1)+column,b=a+1,c=a+columns+1,d=c+1;
+        indices.push(a,c,b,b,c,d);
+      }
+      append(parent,surface(positions,indices,uvs),mats.stoneLight);
+    }
+    for(const degrees of [-72,-36,0,36,72])leaf(degrees*Math.PI/180,base+.02,1.00,.29,0);
+    for(const degrees of [-54,-18,18,54])leaf(degrees*Math.PI/180,base+.28,1.29,.32,1);
+    // Spiral geometry in the facade plane, connected to rising leaf stems.
+    for(const sign of [-1,1]) {
+      const points=[new T.Vector3(-23.20,44.66,z+sign*.35),new T.Vector3(-23.01,44.94,z+sign*.66)];
+      const cy=45.22,cz=z+sign*.94;
+      for(let j=0;j<=26;j++) {
+        const t=j/26,angle=-Math.PI/2+t*Math.PI*2.65,r=.31*(1-t)+.035*t;
+        points.push(new T.Vector3(-22.96+.035*t,cy+Math.sin(angle)*r,cz+sign*Math.cos(angle)*r));
+      }
+      append(parent,new T.TubeGeometry(new T.CatmullRomCurve3(points),34,.057,6,false),mats.stoneLight);
+    }
+    rectangularProfile(parent,-23.61,45.49,z,1.42,2.23,[[0,0],[.02,.04],[.07,.08],[.10,.14],[.10,.19],[.07,.24],[.03,.28],[.03,.34],[-.05,.34],[-.05,0]],.105);
+    block(parent,-23.61,45.80,z,1.32,.06,2.13);
+    reliefRosette(parent,-22.79,45.64,z,.20,.085,6,mats.stoneLight);
+  }
+
+  // A low-relief rosette is a carved field with continuous curved petals and
+  // a small central boss. The perimeter returns to its recessed backing.
+  function reliefRosette(parent,x,y,z,radius,depth,petals,material) {
+    const positions=[],indices=[],uvs=[],rings=6,segments=petals*8;
+    for(let ring=0;ring<=rings;ring++) {
+      const r=ring/rings;
+      for(let k=0;k<=segments;k++) {
+        const angle=k/segments*Math.PI*2;
+        const petal=.5+.5*Math.cos(angle*petals);
+        const outer=radius*(.78+.22*petal);
+        const wave=Math.pow(Math.max(0,Math.sin(Math.PI*r)),.8);
+        const raised=depth*(.12+.88*petal)*wave+depth*.25*Math.exp(-r*r*35);
+        positions.push(x+raised,y+Math.sin(angle)*outer*r,z+Math.cos(angle)*outer*r);
+        uvs.push(.5+Math.cos(angle)*r/2,.5+Math.sin(angle)*r/2);
+      }
+    }
+    for(let ring=0;ring<rings;ring++)for(let k=0;k<segments;k++) {
+      const a=ring*(segments+1)+k,b=a+1,c=a+segments+1,d=c+1;
+      indices.push(a,b,c,b,d,c);
+    }
+    append(parent,surface(positions,indices,uvs),material);
+  }
+
+  // A continuous frame in the YZ plane; its cross-section has a cavetto,
+  // rounded bead and fillet, rather than a stack of square overlay boxes.
+  function wallFrame(parent,x,y,z,width,height,profile,material) {
+    const positions=[],indices=[],uvs=[];
+    for(let side=0;side<4;side++) {
+      const start=positions.length/3;
+      for(const [outset,projection] of profile) {
+        const a=width/2+outset,b=height/2+outset;
+        const corners=[[-a,-b],[a,-b],[a,b],[-a,b]];
+        for(const k of [side,(side+1)%4]) {
+          positions.push(x+projection,y+corners[k][1],z+corners[k][0]);uvs.push(k===side?0:1,outset);
+        }
+      }
+      for(let row=0;row<profile.length-1;row++) {
+        const a=start+row*2,b=a+1,c=a+2,d=c+1;
+        indices.push(a,b,c,b,d,c);
+      }
+    }
+    append(parent,surface(positions,indices,uvs),material);
+  }
+  const panelProfile=[[-.08,0],[-.02,.025],[.025,.06],[.055,.105],[.05,.14],[.015,.165],[.015,.19],[.09,.19],[.14,.16],[.17,.11],[.19,.09],[.24,.09],[.24,.02],[-.08,0]];
+  for(const sign of [-1,1]) {
+    const parent=sign<0?north:sanctuary;
+    for(const z of [sign*11.4,sign*17.4,sign*23.3]) {
+      flutedPilaster(parent,z);capital(parent,z);
+    }
+    for(const z of [sign*14.4,sign*20.4]) {
+      block(parent,-23.83,49.7,z,.13,4.43,4.13,mats.stoneDark);
+      block(parent,-23.735,49.7,z,.08,4.12,3.82,mats.stoneLight);
+      wallFrame(parent,-23.70,49.7,z,3.9,4.2,panelProfile,mats.stoneLight);
+      reliefRosette(parent,-23.665,49.7,z,.83,.17,8,mats.stoneLight);
+      // A small recessed roundel bead separates the central carving from
+      // the panel field. Stone, rather than more gold, carries the relief.
+      const ring=new T.TorusGeometry(1.06,.035,6,64);
+      append(parent,ring,mats.stoneLight,-23.65,49.7,z,[0,Math.PI/2,0]);
+    }
+  }
+  for(let z=-8.8;z<9;z+=1.6)reliefRosette(sanctuary,-23.10,41.5,z,.255,.085,6,mats.gold);
+
+  // A fine continuous round bead on the existing outer gold portal reveal.
+  // Keep its backing and all U-shaped nested frames from the earlier pass.
+  for(const sign of [-1,1]) {
+    const points=[new T.Vector3(-22.91,8.72,sign*9.91),new T.Vector3(-22.91,40.53,sign*9.91)];
+    append(sign<0?north:sanctuary,new T.TubeGeometry(new T.LineCurve3(points[0],points[1]),1,.043,8,false),mats.gold);
+  }
+  append(sanctuary,new T.TubeGeometry(new T.LineCurve3(new T.Vector3(-22.91,40.53,-9.91),new T.Vector3(-22.91,40.53,9.91)),1,.043,8,false),mats.gold);
+
+  let addedTriangles=0,addedDrawCalls=0;
+  for(const [parent,byMaterial] of batches)for(const [material,data] of byMaterial) {
+    const geometry=new T.BufferGeometry();
+    geometry.setAttribute('position',new T.Float32BufferAttribute(data.position,3));
+    geometry.setAttribute('normal',new T.Float32BufferAttribute(data.normal,3));
+    geometry.setAttribute('uv',new T.Float32BufferAttribute(data.uv,2));
+    geometry.computeBoundingSphere();geometry.computeBoundingBox();
+    const mesh=new T.Mesh(geometry,material);
+    mesh.name='Sanctuary v2 — carved capitals, flutes and architectural relief';
+    mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);
+    addedTriangles+=data.position.length/9;addedDrawCalls++;
+  }
+  const stats={addedTriangles,removedTriangles,netTriangles:addedTriangles-removedTriangles,addedDrawCalls,dressedAshlarInstances,facadeFacingDepth:.012,capitals:6,flutesPerPilaster:5,reliefPanels:4,preservesHolyOfHolies:true,preservesCutaway:true};
+  sanctuary.userData.architecturalDetailV2=stats;
+  return stats;
+}
+
+/* Southern approaches: broad stepped flights, a landing at the entrance floor,
+   and genuine vaulted openings through the retaining mass. Positions and exact
+   profiles remain interpretive; the Double/Triple Gate and passage arrangement
+   follows the excavated southern approaches rather than later facade carving. */
+function rebuildSouthernApproaches(T, ctx) {
+  const {world,mats,masonry,box,cutawayParts,instance}=ctx;
+  const south=world.children.find(g=>g.userData.landmark==='south');
+  const mount=world.children.find(g=>g.userData.landmark==='mount');
+  if(!south||!mount)return;
+  south.clear();
+  const B=(p,x,y,z,w,h,d,m=mats.stone)=>box(p,x,y,z,w,h,d,m);
+  const add=(p,geo,mat,x=0,y=0,z=0)=>{const m=new T.Mesh(geo,mat);m.position.set(x,y,z);m.castShadow=m.receiveShadow=true;p.add(m);return m;};
+  // Remove the oversized display-plinth tiers. A footing at the retaining
+  // footprint now reaches the surrounding ground instead of hovering above it.
+  for(const o of [...mount.children]){
+    const d=o.geometry?.parameters;
+    if(!d)continue;
+    if((d.width===330&&d.height===8&&d.depth===500)||(d.width===316&&d.height===4&&d.depth===486)||(d.width===300&&d.height===16&&d.depth===470))mount.remove(o);
+  }
+  B(mount,0,-21,0,300,8,470,masonry);
+  B(mount,0,-9,-22.5,300,16,425,masonry);
+  const vestibule=new T.Group();vestibule.name='Double and Triple southern entrance passages';south.add(vestibule);
+  const centers=[-16,-8,39,47,55],floor=-14.5,back=190,front=235,depth=front-back,r=3.5,spring=7.5;
+  const solidIntervals=[[-150,-20],[-4,35],[59,150]];
+  for(const [a,b]of solidIntervals)B(mount,(a+b)/2,-9,212.5,b-a,16,45,masonry);
+  B(mount,0,-15.75,212.5,300,2.5,45,masonry);
+  // Spandrels include the curved soffit, not a dark picture of an arch.
+  function spandrel(){
+    const s=new T.Shape();s.moveTo(-4,0);s.lineTo(-4,13.5);s.lineTo(4,13.5);s.lineTo(4,0);s.lineTo(r,0);s.lineTo(r,spring);s.absarc(0,spring,r,0,Math.PI,false);s.lineTo(-r,0);s.lineTo(-4,0);s.closePath();
+    return new T.ExtrudeGeometry(s,{depth,steps:1,curveSegments:32,bevelEnabled:false});
+  }
+  const vaultGeo=spandrel();
+  function annular(inner,outer,a,b,d){
+    const s=new T.Shape();s.moveTo(Math.cos(a)*inner,Math.sin(a)*inner);s.absarc(0,0,inner,a,b,false);s.lineTo(Math.cos(b)*outer,Math.sin(b)*outer);s.absarc(0,0,outer,b,a,true);s.closePath();
+    return new T.ExtrudeGeometry(s,{depth:d,steps:1,curveSegments:8,bevelEnabled:true,bevelSize:.012,bevelThickness:.012,bevelSegments:1});
+  }
+  const doors=new T.Group();doors.name='Recessed southern gate jambs and lintels';south.add(doors);
+  for(const x of centers){
+    add(vestibule,vaultGeo,masonry,x,floor,back);
+    B(vestibule,x,floor+.035,212.5,7,.07,45,mats.pavement);
+    // Dressed, individually cut voussoirs and narrow mortarless joints.
+    for(let k=0;k<15;k++)add(doors,annular(3.5,4.02,k*Math.PI/15+.004,(k+1)*Math.PI/15-.004,.6),mats.stoneLight,x,floor+spring,234.8);
+    for(const sign of [-1,1]){
+      for(let row=0;row<6;row++)B(doors,x+sign*3.75,floor+.63+row*1.25,235.12,.49,1.21,.48,mats.stoneLight);
+      B(doors,x+sign*3.56,floor+3.75,234.7,.18,7.5,.62,mats.stoneLight);
+      B(doors,x+sign*3.77,floor+.2,235.2,.65,.4,.85,mats.stoneDark);
+    }
+    for(const z of [198,205.5,213,220.5,228]){
+      add(vestibule,annular(3.36,3.52,0,Math.PI,.3),mats.stoneLight,x,floor+spring,z);
+      for(const sign of [-1,1])B(vestibule,x+sign*3.43,floor+3.75,z+.15,.14,7.5,.3,mats.stoneLight);
+    }
+    // A shadowed back plane makes the unmodeled continuation explicit, while
+    // the vestibule itself remains a physically open, deep architectural space.
+    B(vestibule,x,floor+5.4,190.08,6.95,10.8,.06,mats.dark);
+  }
+  for(const [x,w]of [[-12,17.6],[47,25.6]]){
+    B(doors,x,-2.0,235.3,w,.32,1.0,mats.stoneLight);
+    B(doors,x,-1.74,235.15,w+.4,.2,1.25,mats.stoneLight);
+  }
+  // A long landing serves both entrances at the gateway floor. The former
+  // staircase incorrectly climbed all the way to the precinct surface.
+  B(south,0,-14.63,238.3,280,.26,6.6,mats.pavement);
+  const stepReport=[];
+  function flight(cx,width,base,count){
+    const rise=(floor-base)/count, runs=[];let z=241.6;
+    for(let i=0;i<count;i++){const run=i%2===0?.42:.88;runs.push(run);z+=run;}
+    const length=z-241.6,shape=new T.Shape();shape.moveTo(241.6,base-.3);shape.lineTo(241.6,floor);
+    let cursor=241.6;
+    for(let i=0;i<count;i++){
+      const y=floor-i*rise,run=runs[i];cursor+=run;shape.lineTo(cursor,y);shape.lineTo(cursor,y-rise);
+      B(south,cx,y-.045,cursor-run/2,width,.09,run+.012,mats.stoneLight);
+    }
+    shape.lineTo(cursor,base-.3);shape.closePath();
+    const geo=new T.ExtrudeGeometry(shape,{depth:width,steps:1,curveSegments:1,bevelEnabled:false});
+    const baseMesh=add(south,geo,masonry,cx-width/2,0,0);baseMesh.rotation.y=-Math.PI/2;
+    // Extruded profile's local X maps into south +Z and local Z into +X.
+    // The rotation maps local X into +Z, hence local extrusion points west.
+    baseMesh.position.x=cx+width/2;
+    // Paved foot landing and low stone edges give the broad flight a proper end.
+    B(south,cx,base-.08,cursor+1.5,width+.6,.16,3,mats.pavement);
+    for(const sign of [-1,1]){
+      const sideGeo=geo.clone();const side=add(south,sideGeo,mats.stoneDark,cx+sign*(width/2+.24),0,0);side.rotation.y=-Math.PI/2;side.scale.z=.48/width;side.position.x=cx+sign*(width/2+.24)+.24;
+    }
+    stepReport.push({width,rise,steps:count,length,base,top:floor});
+  }
+  flight(-12,62,-25,58);flight(47,44,-24.0,53);
+  // Clear a shallow bedrock channel under the approach instead of allowing
+  // the old landscape skirt to swallow its lower treads.
+  const rock=world.getObjectByName('Uneven weathered bedrock skirt');
+  if(rock?.geometry?.attributes.position){const p=rock.geometry.attributes.position;for(let i=0;i<p.count;i++)if(p.getX(i)>-49&&p.getX(i)<73&&p.getZ(i)>234&&p.getZ(i)<320)p.setY(i,Math.min(-25.05,p.getY(i)));p.needsUpdate=true;rock.geometry.computeVertexNormals();rock.geometry.computeBoundingSphere();}
+  // The illustrative bath floors must also meet the bedrock. Clearing the
+  // stair channel changes adjacent terrain triangles, so the first bath can
+  // otherwise hover several metres above their interpolated surface. Quiet,
+  // slightly battered footings stop below each existing floor; their western
+  // edge remains east of the stair-clearance channel at x=73.
+  const baths=world.children.find(g=>g.userData.landmark==='baths');
+  const bathSupport={count:0,triangles:0,finite:true,foundations:[]};
+  if(baths){
+    const name='Seated bedrock foundations beneath the illustrative ritual baths';
+    const old=baths.getObjectByName(name);if(old){old.parent.remove(old);old.geometry.dispose();}
+    rock?.updateWorldMatrix(true,false);
+    const ray=new T.Raycaster(),down=new T.Vector3(0,-1,0),positions=[],uvs=[];
+    const faces=[0,2,1,0,3,2,4,5,6,4,6,7,0,1,5,0,5,4,1,2,6,1,6,5,2,3,7,2,7,6,3,0,4,3,4,7];
+    for(let n=0;n<3;n++){
+      const x=82+n*18,z=260+(n%2)*16,halfWidth=7.04,halfDepth=5.54,top=-17.99,spread=.32;
+      let lowest=Infinity;
+      for(const dx of [-halfWidth-spread,0,halfWidth+spread])for(const dz of [-halfDepth-spread,0,halfDepth+spread]){
+        ray.set(new T.Vector3(x+dx,10,z+dz),down);
+        const hit=rock?ray.intersectObject(rock,false)[0]:null;
+        lowest=Math.min(lowest,hit?hit.point.y:-25.1);
+      }
+      const bottom=Math.min(top-.25,lowest-.15);
+      const corners=[[-halfWidth,top,-halfDepth],[halfWidth,top,-halfDepth],[halfWidth,top,halfDepth],[-halfWidth,top,halfDepth],
+        [-halfWidth-spread,bottom,-halfDepth-spread],[halfWidth+spread,bottom,-halfDepth-spread],[halfWidth+spread,bottom,halfDepth+spread],[-halfWidth-spread,bottom,halfDepth+spread]];
+      for(const i of faces){const c=corners[i];positions.push(x+c[0],c[1],z+c[2]);uvs.push(x+c[0],c[1]);}
+      bathSupport.foundations.push({x,z,top,bottom});bathSupport.count++;
+    }
+    const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(positions,3));g.setAttribute('uv',new T.Float32BufferAttribute(uvs,2));g.computeVertexNormals();g.computeBoundingSphere();
+    const footing=new T.Mesh(g,mats.terrain||mats.stoneDark);footing.name=name;footing.castShadow=footing.receiveShadow=true;baths.add(footing);
+    bathSupport.triangles=positions.length/9;bathSupport.finite=positions.every(Number.isFinite);
+  }
+  // Retaining-wall boss relief must leave actual openings; it cannot bridge
+  // the clear arch span now that the dark placeholder planes are gone.
+  const facing=world.getObjectByName('Dressed Herodian retaining ashlar with drafted margins');
+  if(facing?.isInstancedMesh){const matrix=new T.Matrix4(),p=new T.Vector3(),q=new T.Quaternion(),s=new T.Vector3();let out=0;for(let i=0;i<facing.count;i++){
+    facing.getMatrixAt(i,matrix);matrix.decompose(p,q,s);
+    let overlap=false;if(p.z>234&&p.y+s.y/2>floor&&p.y-s.y/2<floor+11.1){for(const x of centers){const nearY=Math.min(spring,Math.max(0,p.y-floor-s.y/2));const allowance=p.y-s.y/2<=floor+spring?r:Math.sqrt(Math.max(0,r*r-(p.y-floor-s.y/2-spring)**2));if(p.x+s.x/2>x-allowance&&p.x-s.x/2<x+allowance)overlap=true;}}
+    if(!overlap){facing.setMatrixAt(out,matrix);if(facing.instanceColor){const c=new T.Color();facing.getColorAt(i,c);facing.setColorAt(out,c);}out++;}
+  }facing.count=out;facing.instanceMatrix.needsUpdate=true;if(facing.instanceColor)facing.instanceColor.needsUpdate=true;facing.computeBoundingSphere();}
+  // Merge the fixed architecture by material, preserving shared source box
+  // geometries. No extra render object is needed for every tread or voussoir.
+  function mergeStatic(parent){
+    const buckets=new Map();for(const o of [...parent.children]){
+      if(!o.isMesh||o.isInstancedMesh)continue;o.updateMatrix();const g=o.geometry.index?o.geometry.toNonIndexed():o.geometry.clone();g.applyMatrix4(o.matrix);
+      if(!g.attributes.normal)g.computeVertexNormals();let b=buckets.get(o.material);if(!b){b={position:[],normal:[],uv:[]};buckets.set(o.material,b);}const p=g.attributes.position,n=g.attributes.normal,u=g.attributes.uv;
+      for(let i=0;i<p.count;i++){b.position.push(p.getX(i),p.getY(i),p.getZ(i));b.normal.push(n.getX(i),n.getY(i),n.getZ(i));b.uv.push(u?u.getX(i):0,u?u.getY(i):0);}g.dispose();parent.remove(o);
+    }
+    for(const [m,b]of buckets){const g=new T.BufferGeometry();for(const[name,size]of [['position',3],['normal',3],['uv',2]])g.setAttribute(name,new T.Float32BufferAttribute(b[name],size));g.computeBoundingSphere();add(parent,g,m).name='Southern approach: joined dressed stone and paved steps';}
+    for(const c of parent.children)if(c.isGroup)mergeStatic(c);
+  }
+  mergeStatic(south);
+  let triangles=0,draws=0,finite=true;south.traverse(o=>{if(o.isMesh){draws++;triangles+=(o.geometry.index?o.geometry.index.count:o.geometry.attributes.position.count)/3;for(const v of o.geometry.attributes.position.array)if(!Number.isFinite(v))finite=false;}});
+  const report={gates:5,vestibuleDepth:depth,landingY:floor,flights:stepReport,triangles,draws,finite,bathSupport};south.userData.construction=report;return report;
+}
+
 (() => {
   const root=document.getElementById('temple-explorer');
   const $=s=>root.querySelector(s), $$=s=>Array.from(root.querySelectorAll(s));
@@ -1558,7 +2706,7 @@ function createTempleContactRenderer(T, renderer, scene, camera) {
   renderer.shadowMap.enabled=true;renderer.shadowMap.autoUpdate=false;renderer.shadowMap.type=T.PCFSoftShadowMap;
   renderer.outputColorSpace=T.SRGBColorSpace;renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=.85;
   renderer.setClearColor(0,0);host.appendChild(renderer.domElement);
-  renderer.domElement.setAttribute('role','img');renderer.domElement.setAttribute('aria-label','3D temple model. Use the viewpoint and camera buttons to explore; select landmarks for descriptions.');
+  renderer.domElement.setAttribute('role','img');renderer.domElement.setAttribute('aria-label','3D temple model. Drag to orbit, use two fingers to pan and pinch to zoom. Mouse wheel zooms in Mouse mode. Viewpoint and camera buttons provide alternatives.');
   const scene=new T.Scene(), camera=new T.PerspectiveCamera(42,1,.08,5000);
   const world=new T.Group();scene.add(world);
   const contactRenderer=createTempleContactRenderer(T,renderer,scene,camera);
@@ -1611,7 +2759,7 @@ function createTempleContactRenderer(T, renderer, scene, camera) {
   const sun=new T.DirectionalLight(0xfff1d5,3.25);sun.castShadow=true;sun.shadow.mapSize.set(mobileGraphics?2048:4096,mobileGraphics?2048:4096);sun.shadow.camera.near=1;sun.shadow.camera.far=1500;sun.shadow.bias=-.00014;sun.shadow.normalBias=.17;sun.shadow.radius=2;scene.add(sun);scene.add(sun.target);
   const fill=new T.DirectionalLight(0xb8cbe1,.22);fill.position.set(-200,120,-200);scene.add(fill);
   let shadowSpan=0;const sunDirection=new T.Vector3(1,1,.55).normalize();
-  function updateShadow(){const distance=camera.position.distanceTo(target),span=distance<140?85:distance<320?180:370;if(span!==shadowSpan){shadowSpan=span;sun.shadow.camera.left=-span;sun.shadow.camera.right=span;sun.shadow.camera.top=span;sun.shadow.camera.bottom=-span;sun.shadow.camera.updateProjectionMatrix();sun.shadow.needsUpdate=true;}if(sun.target.position.distanceToSquared(target)>.001){sun.target.position.copy(target);sun.shadow.needsUpdate=true;}const position=target.clone().addScaledVector(sunDirection,650);if(sun.position.distanceToSquared(position)>.001){sun.position.copy(position);sun.shadow.needsUpdate=true;}if(sun.shadow.needsUpdate)renderer.shadowMap.needsUpdate=true;}
+  function updateShadow(){const distance=camera.position.distanceTo(target),span=distance<16?18:distance<60?48:distance<140?85:distance<320?180:370;if(span!==shadowSpan){shadowSpan=span;sun.shadow.camera.left=-span;sun.shadow.camera.right=span;sun.shadow.camera.top=span;sun.shadow.camera.bottom=-span;sun.shadow.camera.updateProjectionMatrix();sun.shadow.needsUpdate=true;}if(sun.target.position.distanceToSquared(target)>.001){sun.target.position.copy(target);sun.shadow.needsUpdate=true;}const position=target.clone().addScaledVector(sunDirection,650);if(sun.position.distanceToSquared(position)>.001){sun.position.copy(position);sun.shadow.needsUpdate=true;}if(sun.shadow.needsUpdate)renderer.shadowMap.needsUpdate=true;}
   const cutawayParts=[],pickables=[];
   function group(id){const g=new T.Group();g.userData.landmark=id;world.add(g);pickables.push(g);return g;}
   const platform=group('mount');
@@ -1672,8 +2820,16 @@ function createTempleContactRenderer(T, renderer, scene, camera) {
   const pools=group('baths');for(let n=0;n<3;n++){const x=82+n*18,z=260+(n%2)*16;box(pools,x,-17.6,z,14,.8,11,mats.stoneDark);for(const s of [-1,1]){box(pools,x+s*6.5,-16,z,1,3.5,11,masonry);box(pools,x,-16,z+s*5,14,3.5,1,masonry);}for(let i=0;i<7;i++)box(pools,x-4+i*1.2,-15.1-i*.4,z,1.2,.5,9,mats.stone);}
   const sanctuaryDiagnostics=refineTempleSanctuary(T,{world,mats,box,cutawayParts});
   root.dataset.sanctuary=JSON.stringify(sanctuaryDiagnostics);
+  const carvingDiagnostics=enrichSanctuaryDetail(T,{world,mats,box,instance,cutawayParts});
+  root.dataset.carving=JSON.stringify(carvingDiagnostics);
   const architectureDiagnostics=enhanceTempleArchitecture(T,{world,mats,box,instance,cutawayParts,pickables,group});
   root.dataset.architecture=JSON.stringify(architectureDiagnostics);
+  const colonnadeDiagnostics=enrichTempleColonnades(T,{world,mats,box,instance,cutawayParts});
+  root.dataset.colonnades=JSON.stringify(colonnadeDiagnostics);
+  const antoniaDiagnostics=rebuildAntonia(T,{world,mats,masonry,box,instance,cutawayParts,pickables});
+  root.dataset.antonia=JSON.stringify(antoniaDiagnostics);
+  const approachDiagnostics=rebuildSouthernApproaches(T,{world,mats,masonry,box,instance,cutawayParts});
+  root.dataset.approaches=JSON.stringify(approachDiagnostics);
   // Excavated decorative stonework informs these bands; exact locations are interpretive.
   for(const g of [northPortico,westPortico,eastPortico]){
     if(g===northPortico)box(g,0,.14,-220,267,.10,9,mats.mosaic);
@@ -1700,7 +2856,9 @@ function createTempleContactRenderer(T, renderer, scene, camera) {
     east:{title:'Eastern gateway',text:'The sanctuary’s processional axis runs westward from the eastern side of the mount.',point:[150,15,0],view:'east'},
     stoa:{title:'Royal Stoa',text:'The southern basilical hall has four column rows, three aisles, and a raised central roof.',point:[0,28,205],view:'stoa'},
     antonia:{title:'Antonia fortress',text:'The northwest fortress overlooks the precinct. Its southeast tower is the tallest, as Josephus describes.',point:[-120,49,-204],view:'antonia'},
-    south:{title:'Southern approaches',text:'Broad steps and paired vaulted entrances evoke the Huldah Gates; their detailed geometry is schematic.',point:[20,-1,245],view:'south'},
+    south:{title:'Southern approaches',text:'Broad alternating treads rise to a landing at the Double and Triple southern gates. Open vaulted vestibules pass beneath the Royal Stoa; their detailed layout is interpretive.',point:[20,-8,245],view:'south'},
+    capitals:{title:'Carved column capitals',text:'Two staggered crowns of smooth leaves, curled stems, open spiral scrolls, and a shaped abacus give the Corinthian capitals their carved volume. Exact decorative profiles are interpretive.',point:[123,16.7,199],view:'capital'},
+    passages:{title:'Southern vaulted passages',text:'A deep barrel-vaulted vestibule replaces the former flat arch placeholder. The continuation beyond the vestibule is left schematic.',point:[-8,-8,228],view:'vault'},
     arch:{title:'Southwest arch approach',text:'A schematic elevated entrance inspired by the archaeological remains of Robinson’s Arch.',point:[-165,6,173],view:'arch'},
     baths:{title:'Ritual baths',text:'Stepped immersion pools evoke pilgrimage preparation; these pool positions are illustrative.',point:[101,-12,265],view:'south'}
   };
@@ -1710,31 +2868,33 @@ function createTempleContactRenderer(T, renderer, scene, camera) {
     menorah:{eye:[-45,11,0],target:[-47.6,9.4,3.05]},bread:{eye:[-44.5,10.8,-6],target:[-47.3,9.2,-3.02]},
     incense:{eye:[-54,10.8,-3.3],target:[-56.65,9.2,0]},veil:{eye:[-48,22,-15],target:[-59,16,0]},vine:{eye:[-2,48,18],target:[-23,43,0]},
     sanctuary:{eye:[57,42,68],target:[-42,27,0]},altar:{eye:[46,34,-43],target:[-8,8,0]},
-    stoa:{eye:[128,3.2,204],target:[-18,8.5,204]},antonia:{eye:[-209,104,-299],target:[-119,24,-204]},
+    stoa:{eye:[128,3.2,204],target:[-18,8.5,204]},capital:{eye:[126,17.1,202.5],target:[123,16.7,199]},gateway:{eye:[-8,-12.8,247],target:[-8,-8.9,225]},vault:{eye:[-8,-12.8,230],target:[-8,-9.8,206]},antonia:{eye:[-209,104,-299],target:[-119,24,-204]},
     south:{eye:[129,33,344],target:[19,-7,236]},arch:{eye:[-250,39,232],target:[-162,-3,174]}
   };
   const select=$('[data-control="landmark"]');for(const[id,l]of Object.entries(landmarks)){const o=document.createElement('option');o.value=id;o.textContent=l.title;select.appendChild(o);}
   const labelIds=['sanctuary','women','altar','stoa','antonia','south'];
   const labels=labelIds.map(id=>{const b=document.createElement('button');b.type='button';b.className='btn text-small temple-label';b.textContent=landmarks[id].title;b.addEventListener('click',()=>{if(state.tour>=0)endTour();chooseLandmark(id,true);});labelLayer.appendChild(b);return{id,el:b,point:new T.Vector3(...landmarks[id].point)};});
-  let state={view:'sanctuary',landmark:'sanctuary',cutaway:false,labels:false,sun:28,tour:-1};
+  const defaultNavigation=matchMedia('(pointer:coarse)').matches?'touch':/Mac/i.test(navigator.platform)?'trackpad':'mouse';
+  let state={navigation:defaultNavigation,view:'sanctuary',landmark:'sanctuary',cutaway:false,labels:false,sun:28,tour:-1};
   let target=new T.Vector3(...views.sanctuary.target),radius=1,theta=0,phi=1,flight=null,dirty=true;
-  let selectedMeshes=[];
+  let selectedMeshes=[],navigation=null;
   const prefersReduced=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
-  function syncSpherical(){const v=camera.position.clone().sub(target);radius=v.length();theta=Math.atan2(v.x,v.z);phi=Math.acos(T.MathUtils.clamp(v.y/radius,-1,1));}
+  const cameraFloors={stoa:1.18,approach:3.48,gateway:-14.32,vault:-14.32,interior:8.68,menorah:8.68,bread:8.68,incense:8.68,capital:1.18};
+  function syncSpherical(){const v=camera.position.clone().sub(target);radius=v.length();theta=radius>1e-8?Math.atan2(v.x,v.z):0;phi=radius>1e-8?Math.acos(T.MathUtils.clamp(v.y/radius,-1,1)):.025;}
   function stopFlight(){if(flight){syncSpherical();flight=null;}}
-  function cameraFromSpherical(){phi=T.MathUtils.clamp(phi,.025,Math.PI/2-.015);radius=T.MathUtils.clamp(radius,1.5,1800);camera.position.set(target.x+radius*Math.sin(phi)*Math.sin(theta),target.y+radius*Math.cos(phi),target.z+radius*Math.sin(phi)*Math.cos(theta));camera.lookAt(target);dirty=true;}
-  function setView(id,animate=true){const narrow=stage.clientWidth<520;const v=id==='sanctuary'&&narrow?{eye:[73,39,16],target:[-35,28,0]}:(views[id]||views.overview);state.view=id;const toTarget=new T.Vector3(...v.target),to=new T.Vector3(...v.eye),aspect=stage.clientWidth/stage.clientHeight,fit=Math.max(1,(id==='sanctuary'&&narrow?.74:id==='overview'?1.4:1)/aspect);to.sub(toTarget).multiplyScalar(fit).add(toTarget);if(animate&&!prefersReduced())flight={start:performance.now(),from:camera.position.clone(),fromTarget:target.clone(),to,toTarget};else{flight=null;camera.position.copy(to);target.copy(toTarget);camera.lookAt(target);syncSpherical();}$$('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===id)));dirty=true;}
+  function cameraFromSpherical(){const constrained=templeConstrainCameraSphere({radius,phi,targetY:target.y},cameraFloors[state.view]??-24.75);radius=constrained.radius;phi=constrained.phi;target.y=constrained.targetY;camera.position.set(target.x+radius*Math.sin(phi)*Math.sin(theta),target.y+radius*Math.cos(phi),target.z+radius*Math.sin(phi)*Math.cos(theta));camera.lookAt(target);dirty=true;}
+  function setView(id,animate=true){navigation?.cancel();const narrow=stage.clientWidth<520;const v=id==='sanctuary'&&narrow?{eye:[73,39,16],target:[-35,28,0]}:(views[id]||views.overview);state.view=id;const aspect=stage.clientWidth/stage.clientHeight,fit=Math.max(1,(id==='sanctuary'&&narrow?.74:id==='overview'?1.4:1)/aspect),fitted=templeFitCameraPreset(v.eye,v.target,fit,cameraFloors[id]??-24.75),toTarget=new T.Vector3(...fitted.target),to=new T.Vector3(...fitted.eye);if(animate&&!prefersReduced())flight={start:performance.now(),from:camera.position.clone(),fromTarget:target.clone(),to,toTarget};else{flight=null;camera.position.copy(to);target.copy(toTarget);camera.lookAt(target);syncSpherical();}$$('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===id)));dirty=true;}
   const localSession=Math.random().toString(36).slice(2);
   function save(){try{window.openai?.setWidgetState({modelContent:{period:'Herodian Second Temple, c. 30 CE',selectedLandmark:landmarks[state.landmark]?.title,cutaway:state.cutaway},privateContent:{...state,_session:localSession,cameraAspect:camera.aspect,camera:camera.position.toArray(),target:target.toArray()}})?.catch(()=>{});}catch(e){}}
   function setCutaway(value){sun.shadow.needsUpdate=true;state.cutaway=Boolean(value);for(const m of cutawayParts)if(m)m.visible=!state.cutaway;$('[data-control="cutaway"]').checked=state.cutaway;dirty=true;}
   function setSun(value){state.sun=T.MathUtils.clamp(Number(value)||0,0,100);const a=(.12+state.sun/100*.76)*Math.PI;sunDirection.set(Math.cos(a),.22+Math.sin(a)*.9,.42).normalize();sun.intensity=3.0+Math.sin(a)*.65;sun.color.set(state.sun>80?0xffd5a5:state.sun<20?0xffe3ba:0xfff0d7);$('[data-sun-value]').textContent=state.sun<38?'Morning':state.sun<74?'Afternoon':'Evening';$('[data-control="sun"]').value=String(state.sun);dirty=true;}
   function highlight(id){for(const{mesh,material}of selectedMeshes){mesh.material.dispose();mesh.material=material;}selectedMeshes=[];world.traverse(g=>{if(g.userData.landmark!==id)return;g.traverse(m=>{if(m.isMesh&&!m.isInstancedMesh&&m.material?.isMeshStandardMaterial){const original=m.material;m.material=original.clone();m.material.onBeforeCompile=original.onBeforeCompile;m.material.customProgramCacheKey=original.customProgramCacheKey;m.material.emissive=palette.accent.clone();m.material.emissiveIntensity=.025;selectedMeshes.push({mesh:m,material:original});}});});dirty=true;}
-  function chooseLandmark(id,move=false,persist=true){if(!landmarks[id])return;state.landmark=id;select.value=id;const l=landmarks[id];$('[data-detail-title]').textContent=l.title;$('[data-detail-text]').textContent=l.text;highlight(id);if(move){if(['holies','menorah','bread','incense','veil'].includes(id))setCutaway(true);else if(['vine','sanctuary','mount','antonia','east','south','arch'].includes(id))setCutaway(false);setView(l.view);}if(persist)save();}
+  function chooseLandmark(id,move=false,persist=true){if(!landmarks[id])return;state.landmark=id;select.value=id;const l=landmarks[id];$('[data-detail-title]').textContent=l.title;$('[data-detail-text]').textContent=l.text;highlight(id);if(move){if(['holies','menorah','bread','incense','veil'].includes(id))setCutaway(true);else if(['vine','sanctuary','mount','antonia','east','south','arch','capitals','passages'].includes(id))setCutaway(false);setView(l.view);}if(persist)save();}
   const stops=['south','stoa','outer','soreg','women','nicanor','israel','altar','sanctuary','vine','menorah','bread','incense','veil','holies','antonia'];
   function renderTourUI(){const active=state.tour>=0;$('[data-action="previous"]').hidden=!active;$('[data-action="previous"]').disabled=state.tour===0;$('[data-action="next"]').hidden=!active;$('[data-action="next"]').textContent=state.tour===stops.length-1?'Finish tour':'Next stop';$('[data-action="tour"]').textContent=active?'Stop tour':'Start guided tour';if(active)$('[data-detail-title]').textContent=(state.tour+1)+' / '+stops.length+' · '+landmarks[stops[state.tour]].title;}
   function tourStop(n){state.tour=T.MathUtils.clamp(n,0,stops.length-1);setCutaway(state.tour>=10&&state.tour<=14);chooseLandmark(stops[state.tour],true,false);renderTourUI();save();}
   function endTour(){state.tour=-1;chooseLandmark(state.landmark,false,false);renderTourUI();save();}
-  $$('[data-view]').forEach(b=>b.addEventListener('click',()=>{if(state.tour>=0)endTour();const id=b.dataset.view;setCutaway(id==='interior');chooseLandmark(({sanctuary:'sanctuary',overview:'mount',east:'east',approach:'sanctuary',court:'priests',interior:'sanctuary',stoa:'stoa'})[id],false,false);setView(id);save();}));
+  $$('[data-view]').forEach(b=>b.addEventListener('click',()=>{if(state.tour>=0)endTour();const id=b.dataset.view;setCutaway(id==='interior');chooseLandmark(({sanctuary:'sanctuary',overview:'mount',east:'east',approach:'sanctuary',court:'priests',interior:'sanctuary',stoa:'stoa',capital:'capitals',gateway:'south'})[id],false,false);setView(id);save();}));
   select.addEventListener('change',()=>{if(state.tour>=0)endTour();chooseLandmark(select.value,true);});
   $('[data-control="cutaway"]').addEventListener('change',e=>{setCutaway(e.target.checked);save();});
   $('[data-control="labels"]').addEventListener('change',e=>{state.labels=e.target.checked;dirty=true;save();});
@@ -1742,25 +2902,25 @@ function createTempleContactRenderer(T, renderer, scene, camera) {
   $('[data-action="tour"]').addEventListener('click',()=>state.tour<0?tourStop(0):endTour());
   $('[data-action="previous"]').addEventListener('click',()=>tourStop(state.tour-1));$('[data-action="next"]').addEventListener('click',()=>state.tour===stops.length-1?endTour():tourStop(state.tour+1));
   $$('[data-camera]').forEach(b=>b.addEventListener('click',()=>{stopFlight();const a=b.dataset.camera;if(a==='left')theta-=.2;if(a==='right')theta+=.2;if(a==='up')phi-=.12;if(a==='down')phi+=.12;if(a==='in')radius*=.8;if(a==='out')radius*=1.25;cameraFromSpherical();save();}));
-  const pointers=new Map();let dragging=false,firstDown=null,pinchDistance=0;
-  renderer.domElement.addEventListener('pointerdown',e=>{stopFlight();renderer.domElement.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});firstDown={x:e.clientX,y:e.clientY,time:performance.now()};dragging=false;if(pointers.size===2){const p=[...pointers.values()];pinchDistance=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y);}});
-  renderer.domElement.addEventListener('pointermove',e=>{const prev=pointers.get(e.pointerId);if(!prev)return;const dx=e.clientX-prev.x,dy=e.clientY-prev.y;pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});if(firstDown&&Math.hypot(e.clientX-firstDown.x,e.clientY-firstDown.y)>5)dragging=true;if(pointers.size===2){const p=[...pointers.values()],d=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y);if(d>0&&pinchDistance>0)radius*=pinchDistance/d;pinchDistance=d;dragging=true;}else if(e.shiftKey||e.buttons===2){const right=new T.Vector3().setFromMatrixColumn(camera.matrix,0),up=new T.Vector3().setFromMatrixColumn(camera.matrix,1),speed=radius*.0018;target.addScaledVector(right,-dx*speed).addScaledVector(up,dy*speed);target.y=T.MathUtils.clamp(target.y,-16,90);}else{theta-=dx*.007;phi-=dy*.006;}cameraFromSpherical();});
   const ray=new T.Raycaster(),mouse=new T.Vector2();
   function pick(e){const rect=renderer.domElement.getBoundingClientRect();mouse.set((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1);ray.setFromCamera(mouse,camera);const hits=ray.intersectObjects(pickables,true);for(const hit of hits){let obj=hit.object,visible=true;for(let p=obj;p;p=p.parent)if(!p.visible)visible=false;if(!visible)continue;let id;while(obj){if(obj.userData.landmark){id=obj.userData.landmark;break;}obj=obj.parent;}if(id){if(state.tour>=0)endTour();chooseLandmark(id,false);break;}}}
-  renderer.domElement.addEventListener('pointerup',e=>{const wasSingle=pointers.size===1;pointers.delete(e.pointerId);if(!dragging&&wasSingle&&firstDown&&performance.now()-firstDown.time<600)pick(e);if(pointers.size===0){save();firstDown=null;}else dragging=true;});
-  renderer.domElement.addEventListener('pointercancel',e=>{pointers.delete(e.pointerId);dragging=true;});renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());
-  renderer.domElement.addEventListener('wheel',e=>{e.preventDefault();stopFlight();radius*=Math.exp(T.MathUtils.clamp(e.deltaY,-120,120)*.0018);cameraFromSpherical();clearTimeout(wheelSave);wheelSave=setTimeout(save,220);},{passive:false});let wheelSave;
-  function resize(){const r=stage.getBoundingClientRect();if(r.width<=0)return;renderer.setSize(r.width,r.height);contactRenderer.resize(r.width,r.height);camera.aspect=r.width/r.height;camera.updateProjectionMatrix();dirty=true;}
+  function setNavigationMode(mode){state.navigation=['trackpad','mouse','touch'].includes(mode)?mode:defaultNavigation;$('[data-control="navigation"]').value=state.navigation;$('[data-navigation-help]').textContent=state.navigation==='mouse'?'Left-drag to orbit · right/middle-drag to pan · wheel to zoom':state.navigation==='touch'?'Drag to orbit · two fingers to pan and pinch to zoom':'Click-drag to orbit · two fingers to pan · pinch to zoom';navigation?.cancel();}
+  navigation=createTempleNavigation(T,{canvas:renderer.domElement,camera,stage,getMode:()=>state.navigation,getPose:()=>({radius,theta,phi,target:target.clone()}),onStart:stopFlight,onCommit:save,onPick:pick,
+    orbit(dx,dy){theta-=dx*.007;phi-=dy*.006;cameraFromSpherical();},
+    applyPose(pose){const rawY=pose.target.y,oldPhi=phi;radius=pose.radius;target.copy(pose.target);target.y=T.MathUtils.clamp(target.y,-24,100);cameraFromSpherical();return target.y!==rawY||phi!==oldPhi;}
+  });
+  $('[data-control="navigation"]').addEventListener('change',e=>{setNavigationMode(e.target.value);save();});setNavigationMode(state.navigation);
+  function resize(){navigation?.cancel();const r=stage.getBoundingClientRect();if(r.width<=0)return;renderer.setSize(r.width,r.height);contactRenderer.resize(r.width,r.height);camera.aspect=r.width/r.height;camera.updateProjectionMatrix();dirty=true;}
   const resizeObserver=new ResizeObserver(resize);resizeObserver.observe(stage);
-  function applySaved(raw){const s=raw?.privateContent;if(!s||typeof s!=='object'||s._session===localSession)return;state.labels=typeof s.labels==='boolean'?s.labels:false;$('[data-control="labels"]').checked=state.labels;setCutaway(s.cutaway);setSun(typeof s.sun==='number'?s.sun:28);chooseLandmark(s.landmark||'sanctuary',false,false);setView(views[s.view]?s.view:'sanctuary',false);if((!s.cameraAspect||Math.abs(s.cameraAspect-camera.aspect)<.25)&&Array.isArray(s.camera)&&s.camera.length===3&&s.camera.every(Number.isFinite)&&Array.isArray(s.target)&&s.target.length===3&&s.target.every(Number.isFinite)){camera.position.fromArray(s.camera);target.fromArray(s.target);camera.lookAt(target);syncSpherical();}state.tour=Number.isInteger(s.tour)&&s.tour>=0&&s.tour<stops.length?s.tour:-1;renderTourUI();dirty=true;}
+  function applySaved(raw){const s=raw?.privateContent;if(!s||typeof s!=='object'||s._session===localSession)return;setNavigationMode(s.navigation||defaultNavigation);state.labels=typeof s.labels==='boolean'?s.labels:false;$('[data-control="labels"]').checked=state.labels;setCutaway(s.cutaway);setSun(typeof s.sun==='number'?s.sun:28);chooseLandmark(s.landmark||'sanctuary',false,false);setView(views[s.view]?s.view:'sanctuary',false);if((!s.cameraAspect||Math.abs(s.cameraAspect-camera.aspect)<.25)&&Array.isArray(s.camera)&&s.camera.length===3&&s.camera.every(Number.isFinite)&&Array.isArray(s.target)&&s.target.length===3&&s.target.every(Number.isFinite)){camera.position.fromArray(s.camera);target.fromArray(s.target);camera.lookAt(target);syncSpherical();cameraFromSpherical();}state.tour=Number.isInteger(s.tour)&&s.tour>=0&&s.tour<stops.length?s.tour:-1;renderTourUI();dirty=true;}
   resize();setView('sanctuary',false);setSun(28);chooseLandmark('sanctuary',false,false);applySaved(window.openai?.widgetState);const handleGlobalState=e=>{if(e.detail?.globals?.widgetState)applySaved(e.detail.globals.widgetState);};window.addEventListener('openai:set_globals',handleGlobalState);
   function updateTheme(){palette=colors();highlight(state.landmark);dirty=true;}
   const schemeQuery=matchMedia('(prefers-color-scheme: dark)');schemeQuery.addEventListener('change',updateTheme);const themeObserver=new MutationObserver(updateTheme);themeObserver.observe(document.documentElement,{attributes:true,attributeFilter:['class','style','data-theme']});
   const projected=new T.Vector3();
   function drawLabels(){const w=stage.clientWidth,h=stage.clientHeight,occupied=[];const sorted=[...labels].sort((a,b)=>Number(b.id===state.landmark)-Number(a.id===state.landmark));for(const l of sorted){const selected=l.id===state.landmark,near=radius<125;l.el.hidden=false;const lw=l.el.offsetWidth,lh=l.el.offsetHeight;projected.copy(l.point).project(camera);const x=(projected.x+1)*w/2,y=(1-projected.y)*h/2;let visible=state.labels&&projected.z<1&&projected.z>-1&&x>lw/2+4&&x<w-lw/2-4&&y>lh+4&&y<h-30&&(!near||selected||['sanctuary','women','altar'].includes(l.id));if(visible){const bound=[x-lw/2-4,y-lh-4,x+lw/2+4,y+4];if(occupied.some(b=>bound[0]<b[2]&&bound[2]>b[0]&&bound[1]<b[3]&&bound[3]>b[1]))visible=false;else occupied.push(bound);}l.el.hidden=!visible;if(visible){l.el.style.left=x+'px';l.el.style.top=y+'px';l.el.setAttribute('aria-pressed',String(selected));}}labelLayer.setAttribute('aria-hidden',String(!state.labels));const north=new T.Vector3(0,0,-1).applyQuaternion(camera.quaternion.clone().invert());const angle=Math.atan2(north.x,-north.y)*180/Math.PI;$('.temple-orientation').textContent='N '+(Math.abs(angle)<30?'↑':angle>30&&angle<150?'→':angle< -30&&angle> -150?'←':'↓')+' · east-facing sanctuary';}
   let visible=true;const intersectionObserver=new IntersectionObserver(entries=>{visible=entries[0].isIntersecting;if(visible)dirty=true;});intersectionObserver.observe(stage);
-  function dispose(){resizeObserver.disconnect();intersectionObserver.disconnect();themeObserver.disconnect();schemeQuery.removeEventListener('change',updateTheme);window.removeEventListener('openai:set_globals',handleGlobalState);clearTimeout(wheelSave);const geometries=new Set(),materials=new Set(Object.values(mats)),textures=new Set(textureObjects);for(const s of selectedMeshes)materials.add(s.material);scene.traverse(o=>{if(o.geometry)geometries.add(o.geometry);if(o.material)for(const m of(Array.isArray(o.material)?o.material:[o.material]))materials.add(m);});for(const m of materials){for(const value of Object.values(m))if(value?.isTexture)textures.add(value);m.dispose();}for(const g of geometries)g.dispose();for(const t of textures)t.dispose();contactRenderer.dispose();envTarget.dispose();renderer.dispose();}
-  function frame(now){if(!root.isConnected){dispose();return;}requestAnimationFrame(frame);if(!visible)return;if(flight){const t=Math.min(1,(now-flight.start)/850),k=t*t*(3-2*t);camera.position.lerpVectors(flight.from,flight.to,k);target.lerpVectors(flight.fromTarget,flight.toTarget,k);camera.lookAt(target);dirty=true;if(t===1){flight=null;syncSpherical();save();}}if(dirty){const near=Math.max(.04,Math.min(1.2,camera.position.distanceTo(target)*.002));if(Math.abs(camera.near-near)>.005){camera.near=near;camera.updateProjectionMatrix();}updateShadow();renderer.info.reset();contactRenderer.render();drawLabels();root.dataset.glError=String(renderer.getContext().getError());root.dataset.contextLost=String(renderer.getContext().isContextLost());root.dataset.drawCalls=String(renderer.info.render.calls);root.dataset.triangles=String(renderer.info.render.triangles);dirty=false;}}
+  function dispose(){resizeObserver.disconnect();intersectionObserver.disconnect();themeObserver.disconnect();schemeQuery.removeEventListener('change',updateTheme);window.removeEventListener('openai:set_globals',handleGlobalState);navigation?.dispose();const geometries=new Set(),materials=new Set(Object.values(mats)),textures=new Set(textureObjects);for(const s of selectedMeshes)materials.add(s.material);scene.traverse(o=>{if(o.geometry)geometries.add(o.geometry);if(o.material)for(const m of(Array.isArray(o.material)?o.material:[o.material]))materials.add(m);});for(const m of materials){for(const value of Object.values(m))if(value?.isTexture)textures.add(value);m.dispose();}for(const g of geometries)g.dispose();for(const t of textures)t.dispose();contactRenderer.dispose();envTarget.dispose();renderer.dispose();}
+  function frame(now){if(!root.isConnected){dispose();return;}requestAnimationFrame(frame);if(!visible)return;if(flight){const t=Math.min(1,(now-flight.start)/850),k=t*t*(3-2*t);camera.position.lerpVectors(flight.from,flight.to,k);target.lerpVectors(flight.fromTarget,flight.toTarget,k);camera.lookAt(target);dirty=true;if(t===1){flight=null;syncSpherical();save();}}if(dirty){const near=Math.max(.04,Math.min(1.2,camera.position.distanceTo(target)*.002));if(Math.abs(camera.near-near)>.005){camera.near=near;camera.updateProjectionMatrix();}const columnDetail=world.userData.updateTempleColumnDetail?.(camera);if(columnDetail?.changed)sun.shadow.needsUpdate=true;if(columnDetail)root.dataset.columnDetail=JSON.stringify(columnDetail);updateShadow();renderer.info.reset();contactRenderer.render();drawLabels();root.dataset.glError=String(renderer.getContext().getError());root.dataset.contextLost=String(renderer.getContext().isContextLost());root.dataset.camera=JSON.stringify({view:state.view,position:camera.position.toArray(),target:target.toArray(),radius,phi,theta});root.dataset.drawCalls=String(renderer.info.render.calls);root.dataset.triangles=String(renderer.info.render.triangles);dirty=false;}}
   resize();loading.hidden=true;root.dataset.ready='true';root.dataset.meshes=String(boxCache.size);requestAnimationFrame(frame);
 })();
 </script>
@@ -1768,8 +2928,8 @@ function createTempleContactRenderer(T, renderer, scene, camera) {
 </main>
 <footer>
 <details><summary>About this reconstruction &amp; sources</summary>
-<p>The Herodian Second Temple, around 30 CE. Layout and principal spaces follow ancient descriptions; detailed decoration, landscape, colors, paving placement and people are interpretive. Dimensions use an illustrative 0.5 m cubit. The Holy of Holies is empty.</p>
-<p>Architectural references: <a href="https://penelope.uchicago.edu/josephus/war-5.html" target="_blank" rel="noopener">Josephus, Jewish War 5</a> · <a href="https://penelope.uchicago.edu/josephus/ant-15.html" target="_blank" rel="noopener">Antiquities 15</a> · <a href="https://www.sefaria.org/Mishnah_Middot" target="_blank" rel="noopener">Mishnah Middot</a> · <a href="https://image-database.nes.lsa.umich.edu/items/show/179" target="_blank" rel="noopener">Israel Museum model photograph</a> · <a href="https://tmsifting.org/en/2016/09/06/1374/" target="_blank" rel="noopener">Excavated geometric stone flooring</a>. Captured daylight: <a href="https://polyhaven.com/a/dry_meadow" target="_blank" rel="noopener">Poly Haven, Dry Meadow</a> (CC0). <a href="https://github.com/never-nude/temple" target="_blank" rel="noopener">Project on GitHub</a>.</p>
+<p>The Herodian Second Temple, around 30 CE. Layout and principal spaces follow ancient descriptions; detailed decoration, landscape, colors, paving placement and people are interpretive. Dimensions use an illustrative 0.5 m cubit. The Holy of Holies is empty. Antonia’s courtyard, carved profiles, southern stair details and passage continuation are interpretive; the southern vestibules extend 45 metres into a schematic passage network.</p>
+<p>Architectural references: <a href="https://penelope.uchicago.edu/josephus/war-5.html" target="_blank" rel="noopener">Josephus, Jewish War 5</a> · <a href="https://penelope.uchicago.edu/josephus/ant-15.html" target="_blank" rel="noopener">Antiquities 15</a> · <a href="https://www.sefaria.org/Mishnah_Middot" target="_blank" rel="noopener">Mishnah Middot</a> · <a href="https://image-database.nes.lsa.umich.edu/items/show/179" target="_blank" rel="noopener">Israel Museum model photograph</a> · <a href="https://tmsifting.org/en/2016/09/06/1374/" target="_blank" rel="noopener">Excavated geometric stone flooring</a>. Carved forms: <a href="https://museum.imj.org.il/journal/archive/2017/pdf/IMSA-8_Herodian%20-Ionic-Capital.pdf" target="_blank" rel="noopener">Herodian smooth-leaf capital study</a> · <a href="https://publications.iaa.org.il/atiqot/vol85/iss1/9/" target="_blank" rel="noopener">Triple Gate excavations</a> · <a href="https://www.penn.museum/sites/expedition/recent-excavations-in-jerusalem/" target="_blank" rel="noopener">Southern approaches excavation report</a>. Captured daylight: <a href="https://polyhaven.com/a/dry_meadow" target="_blank" rel="noopener">Poly Haven, Dry Meadow</a> (CC0). <a href="https://github.com/never-nude/temple" target="_blank" rel="noopener">Project on GitHub</a>.</p>
 </details>
 </footer>
 <script>
