@@ -36,7 +36,7 @@ window.openai={widgetState:savedModel,setWidgetState(value){this.widgetState=val
     <button class="btn" type="button" data-view="facade" aria-pressed="false">Temple façade</button>
     <button class="btn" type="button" data-view="gateway" aria-pressed="false">Southern gates</button>
   </div>
-  <div class="temple-gesture-guide"><span class="text-small text-muted" id="temple-gesture-help" data-navigation-help>Click-drag to rotate · 2 fingers to move · Pinch to zoom</span><button class="btn" type="button" data-action="reset" aria-label="Reset view">Reset view</button></div>
+  <div class="temple-gesture-guide"><span class="text-small text-muted" id="temple-gesture-help" data-navigation-help>Drag to orbit · Scroll/pinch to zoom · Shift/right-drag to pan</span><button class="btn" type="button" data-action="reset" aria-label="Reset view">Reset view</button></div>
   <div class="temple-stage" aria-label="Interactive 3D reconstruction of the Second Temple complex" aria-describedby="temple-gesture-help">
     <div class="temple-canvas"></div><div class="temple-labels" aria-hidden="true"></div>
     <span class="temple-orientation text-small">N ↑ · east-facing sanctuary</span>
@@ -54,9 +54,6 @@ window.openai={widgetState:savedModel,setWidgetState(value){this.widgetState=val
     <label class="form-label">Sunlight <span data-sun-value class="tabular-nums">Morning</span><input class="form-range" type="range" data-control="sun" min="0" max="100" value="28" aria-label="Sunlight, morning to evening"></label>
   </div>
   <div class="temple-detail" aria-live="polite"><span data-detail-title>Temple Mount</span><span class="text-muted" data-detail-text>A monumental raised precinct surrounding the sanctuary and its courts.</span></div>
-  <div class="temple-navigation">
-    <label class="text-small text-muted">Controls <select class="form-select" data-control="navigation" aria-label="Navigation device"><option value="trackpad">Trackpad</option><option value="mouse">Mouse</option><option value="touch">Touchscreen</option></select></label>
-  </div>
   <div class="viz-row temple-camera" role="group" aria-label="Camera controls">
     <button class="btn" type="button" data-camera="left" aria-label="Rotate left">↶</button>
     <button class="btn" type="button" data-camera="right" aria-label="Rotate right">↷</button>
@@ -83,11 +80,12 @@ window.openai={widgetState:savedModel,setWidgetState(value){this.widgetState=val
 #temple-explorer .temple-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
 #temple-explorer .temple-detail{display:flex;gap:8px;flex-wrap:wrap;min-height:46px;align-items:baseline;padding:10px 0}
 #temple-explorer [data-detail-title]{font-weight:500}
-#temple-explorer .temple-gesture-guide{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:4px 0 8px;min-height:44px}#temple-explorer .temple-gesture-guide>span{line-height:1.5;min-width:0}#temple-explorer .temple-gesture-guide .btn{flex-shrink:0;padding:8px 12px}#temple-explorer .temple-navigation{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:12px 0}#temple-explorer .temple-navigation label{display:flex;align-items:center;gap:8px}#temple-explorer .temple-navigation select{width:auto;min-width:118px}#temple-explorer .temple-camera{justify-content:flex-start}
+#temple-explorer .temple-gesture-guide{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:4px 0 8px;min-height:44px}#temple-explorer .temple-gesture-guide>span{line-height:1.5;min-width:0}#temple-explorer .temple-gesture-guide .btn{flex-shrink:0;padding:8px 12px}#temple-explorer .temple-camera{justify-content:flex-start}
 #temple-explorer .temple-options{margin-bottom:10px}
 @media(max-width:520px){#temple-explorer .temple-stage{height:clamp(380px,58svh,500px)}#temple-explorer .temple-fields{grid-template-columns:1fr;gap:10px}#temple-explorer .temple-heading{align-items:flex-start;gap:4px}#temple-explorer .temple-camera>span{flex-basis:100%}}
 </style>
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
+<script src="./vendor/three.min.js"></script>
+<script src="./vendor/OrbitControls.js"></script>
 <script src="./vendor/RGBELoader.js"></script>
 <script>
 /* Herodian sanctuary: an architectural, historically informed reconstruction.
@@ -2244,16 +2242,10 @@ function refineTempleMaterials(T, ctx) {
   };
 }
 
-/* Navigation keeps physical input streams separate: a pinch is applied once,
-   and two touch points use a fixed baseline for simultaneous pan and zoom. */
+/* Atrium interaction settings, with the temple’s metre-scale inspection limits. */
 const TEMPLE_CAMERA_LIMITS=Object.freeze({min:.05,max:1800,minPhi:.025,maxPhi:Math.PI-.035});
 // Millimetre near clipping keeps carvings visible at the closest inspection scale.
 function templeCameraNearPlane(radius){return Math.max(.002,Math.min(1.2,radius*.002));}
-function templeWheelPixels(event, height, width=height) {
-  const unitX=event.deltaMode===1?16:event.deltaMode===2?Math.max(1,width):1;
-  const unitY=event.deltaMode===1?16:event.deltaMode===2?Math.max(1,height):1;
-  return {x:(Number.isFinite(event.deltaX)?event.deltaX:0)*unitX,y:(Number.isFinite(event.deltaY)?event.deltaY:0)*unitY};
-}
 // Make the floor constraint feasible even after panning the orbit target below
 // the floor and then zooming in. The polar interval must never be inverted.
 function templeConstrainCameraSphere(pose, lowest, limits=TEMPLE_CAMERA_LIMITS) {
@@ -2275,103 +2267,103 @@ function templeFitCameraPreset(eye, target, fit=1, lowest=-24.75) {
   const center=[target[0],sphere.targetY,target[2]],r=sphere.radius,p=sphere.phi;
   return {eye:[center[0]+r*Math.sin(p)*Math.sin(theta),center[1]+r*Math.cos(p),center[2]+r*Math.sin(p)*Math.cos(theta)],target:center};
 }
-function templeGestureProjection(start, current, limits=TEMPLE_CAMERA_LIMITS) {
-  const distance=Math.max(.001,Number.isFinite(current.distance)?current.distance:.001);
-  const wanted=start.radius*Math.max(.001,start.distance)/distance;
-  const radius=Math.max(limits.min,Math.min(limits.max,wanted));
-  const unit=2*Math.tan(start.fov*Math.PI/360)/Math.max(1,start.height);
-  const oldUnit=start.radius*unit,newUnit=radius*unit;
-  return {radius,right:(start.x-start.centerX)*oldUnit-(current.x-start.centerX)*newUnit,
-    up:-(start.y-start.centerY)*oldUnit+(current.y-start.centerY)*newUnit,clamped:radius!==wanted};
-}
-function createTemplePinchOwnership() {
-  let owner=null,until=0;
-  const active=(now)=>{if(owner!=='native'&&owner!=='pointers'&&now>=until)owner=null;return owner;};
-  return {
-    pointerStart(){owner='pointers';until=Infinity;},
-    pointerEnd(now){if(owner==='pointers'){owner='pointer-tail';until=now+180;}},
-    nativeStart(now){const o=active(now);if(o==='pointers'||o==='wheel'||o==='pointer-tail')return false;owner='native';until=Infinity;return true;},
-    nativeEnd(now){if(owner==='native'){owner='native-tail';until=now+180;}},
-    wheel(now){const o=active(now);if(o&&o!=='wheel')return false;owner='wheel';until=now+180;return true;},
-    blocksPan(now){const o=active(now);return Boolean(o);},
-    reset(){owner=null;until=0;}
-  };
-}
+const TEMPLE_ATRIUM_CONTROLS=Object.freeze({damping:.08,rotateSpeed:.9,zoomSpeed:1.35,zoomIn:.68,zoomOut:1.46});
 function createTempleNavigation(T,options) {
-  const {canvas,camera,stage}=options, points=new Map(),ownership=createTemplePinchOwnership();
-  const listeners=[];let baseline=null,nativeBaseline=null,dragged=false,wasMultiple=false,firstDown=null,wheelTimer=null,changed=false;
+  const {canvas,camera}=options,listeners=[],points=new Set();
+  let controls,disposed=false,suppressed=false,changed=false,commitTimer=null,tap=null,lastTap=null;
+  let nativeActive=false,nativeScale=1,nativeUntil=0,lastPinchWheel=-Infinity,lastReset=-Infinity;
+  const reportedPosition=new T.Vector3(),reportedTarget=new T.Vector3();
+  const reportPose=()=>{reportedPosition.copy(camera.position);reportedTarget.copy(controls.target);};
   const now=()=>performance.now();
-  const listen=(target,type,handler,settings)=>{target.addEventListener(type,handler,settings);listeners.push([target,type,handler,settings]);};
-  const basis=()=>({right:new T.Vector3(1,0,0).applyQuaternion(camera.quaternion),up:new T.Vector3(0,1,0).applyQuaternion(camera.quaternion)});
-  const touches=()=>[...points.entries()].filter(([,p])=>p.type==='touch').slice(0,2);
-  const directPointer=()=>[...points.values()].some(p=>p.type!=='mouse');
-  const samePair=pair=>baseline&&pair.length===2&&baseline.ids.every((id,i)=>id===pair[i][0]);
-  function sample(pair){const a=pair[0][1],b=pair[1][1];return{x:(a.x+b.x)/2,y:(a.y+b.y)/2,distance:Math.max(.001,Math.hypot(a.x-b.x,a.y-b.y))};}
-  function snapshot(x,y,distance,ids=null){const rect=canvas.getBoundingClientRect(),pose=options.getPose();return{...pose,target:pose.target.clone(),...basis(),x,y,distance,ids,centerX:rect.left+rect.width/2,centerY:rect.top+rect.height/2,height:rect.height,fov:camera.getEffectiveFOV()};}
-  function change(action){const before=options.getPose(),result=action(),after=options.getPose();if(['radius','theta','phi'].some(k=>before[k]!==after[k])||['x','y','z'].some(k=>before.target[k]!==after.target[k]))changed=true;return result;}
-  function commit(){if(changed){changed=false;options.onCommit();}}
-  function rebase(){const pair=touches();if(pair.length!==2){baseline=null;return;}const p=sample(pair);baseline=snapshot(p.x,p.y,p.distance,pair.map(([id])=>id));}
-  function commitSoon(){clearTimeout(wheelTimer);wheelTimer=setTimeout(()=>{wheelTimer=null;commit();},220);}
-  function applyProjected(start,current){const result=templeGestureProjection(start,current);const target=start.target.clone().addScaledVector(start.right,result.right).addScaledVector(start.up,result.up);const constrained=change(()=>options.applyPose({radius:result.radius,target}));if(result.clamped||constrained){if(start===nativeBaseline)nativeBaseline=snapshot(current.x,current.y,current.distance);else rebase();}}
-  function pan(dx,dy){const pose=options.getPose(),unit=2*pose.radius*Math.tan(camera.getEffectiveFOV()*Math.PI/360)/Math.max(1,stage.clientHeight),axes=basis();change(()=>options.applyPose({radius:pose.radius,target:pose.target.clone().addScaledVector(axes.right,-dx*unit).addScaledVector(axes.up,dy*unit)}));}
-  function zoom(factor,event){const rect=canvas.getBoundingClientRect(),x=Number.isFinite(event.clientX)?event.clientX:rect.left+rect.width/2,y=Number.isFinite(event.clientY)?event.clientY:rect.top+rect.height/2;const start=snapshot(x,y,1);applyProjected(start,{x,y,distance:1/factor});}
-  function clear(commitChanges=false){if(commitChanges)commit();changed=false;const ids=[...points.keys()];points.clear();baseline=null;nativeBaseline=null;firstDown=null;dragged=false;wasMultiple=false;ownership.reset();clearTimeout(wheelTimer);wheelTimer=null;for(const id of ids)try{if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}catch(e){}}
-  listen(canvas,'pointerdown',e=>{
-    if(e.pointerType==='mouse'&&e.button>2)return;e.preventDefault();
-    const type=e.pointerType||'mouse',active=points.values().next().value;
-    if(points.has(e.pointerId)||(active&&(active.type!==type||type!=='touch')))return;
-    change(options.onStart);options.onInput?.(type==='mouse'?options.getMode():'touch');
-    if(points.size===0){firstDown={x:e.clientX,y:e.clientY,time:now(),button:e.button,type:e.pointerType};dragged=false;wasMultiple=false;}
-    if(!active&&type!=='mouse'){nativeBaseline=null;ownership.reset();}
-    points.set(e.pointerId,{x:e.clientX,y:e.clientY,type,button:e.button,anchorX:e.clientX,anchorY:e.clientY,orbitReady:false});try{canvas.setPointerCapture(e.pointerId);}catch(error){}
-    const pair=touches();if(pair.length===2){wasMultiple=true;dragged=true;nativeBaseline=null;ownership.pointerStart();if(!samePair(pair))rebase();}
-  },{passive:false});
-  listen(canvas,'pointermove',e=>{
-    const previous=points.get(e.pointerId);if(!previous)return;e.preventDefault();
-    if(previous.type==='mouse'&&e.buttons===0){release(e,true);return;}
-    const dx=e.clientX-previous.x,dy=e.clientY-previous.y;points.set(e.pointerId,{...previous,x:e.clientX,y:e.clientY});
-    if(dx===0&&dy===0)return;
-    const pair=touches();
-    if(pair.length===2){
-      if(!samePair(pair))rebase();
-      if(baseline&&baseline.ids.includes(e.pointerId))applyProjected(baseline,sample(pair));
-      dragged=true;wasMultiple=true;return;
-    }
-    if(previous.type==='mouse'){
-      if(firstDown&&Math.hypot(e.clientX-firstDown.x,e.clientY-firstDown.y)>4)dragged=true;
-      if(e.buttons&6||e.shiftKey)pan(dx,dy);else change(()=>options.orbit(dx,dy));
-    }else{
-      let orbitX=dx,orbitY=dy;
-      if(!previous.orbitReady){orbitX=e.clientX-previous.anchorX;orbitY=e.clientY-previous.anchorY;if(Math.hypot(orbitX,orbitY)<=4)return;points.get(e.pointerId).orbitReady=true;}
-      dragged=true;change(()=>options.orbit(orbitX,orbitY));
-    }
-  },{passive:false});
-  function release(e,cancelled){
-    if(!points.has(e.pointerId))return;
-    const single=points.size===1,pairBefore=touches();points.delete(e.pointerId);const pairAfter=touches();
-    if(!cancelled&&single&&!dragged&&!wasMultiple&&firstDown&&(firstDown.type!=='mouse'||firstDown.button===0)&&now()-firstDown.time<600)options.onPick(e);
-    const pairChanged=pairBefore.length===2&&(pairAfter.length!==2||pairBefore.some(([id],i)=>id!==pairAfter[i][0]));
-    if(pairChanged){ownership.pointerEnd(now());baseline=null;dragged=true;wasMultiple=true;
-      if(pairAfter.length===2){ownership.pointerStart();rebase();}
-      else if(points.size===1){const remaining=points.values().next().value;remaining.anchorX=remaining.x;remaining.anchorY=remaining.y;remaining.orbitReady=false;}
-    }
-    if(points.size===0){firstDown=null;baseline=null;commit();}else dragged=true;
+  const listen=(target,type,fn,settings)=>{target.addEventListener(type,fn,settings);listeners.push([target,type,fn,settings]);};
+  function commit(){clearTimeout(commitTimer);commitTimer=null;if(changed){changed=false;options.onCommit();}}
+  function changedPose(){
+    if(suppressed||disposed)return;
+    options.onChangePose(controls.target);reportPose();changed=true;
+    clearTimeout(commitTimer);commitTimer=setTimeout(commit,220);
   }
-  listen(canvas,'pointerup',e=>release(e,false));
-  listen(canvas,'pointercancel',e=>release(e,true));
-  listen(canvas,'lostpointercapture',e=>release(e,true));
-  listen(canvas,'contextmenu',e=>e.preventDefault());listen(canvas,'auxclick',e=>e.preventDefault());
+  function sync(){
+    if(disposed)return;
+    const position=camera.position.clone(),center=options.getPose().target.clone(),damping=controls.enableDamping;
+    suppressed=true;
+    try{
+      controls.enableDamping=false;controls.update();
+      camera.position.copy(position);controls.target.copy(center);controls.update();
+    }finally{controls.enableDamping=damping;suppressed=false;reportPose();}
+  }
+  function makeControls(){
+    const position=camera.position.clone(),center=options.getPose().target.clone();
+    controls=new T.OrbitControls(camera,canvas);
+    controls.enableDamping=!options.prefersReduced?.();controls.dampingFactor=TEMPLE_ATRIUM_CONTROLS.damping;
+    controls.enablePan=true;controls.screenSpacePanning=true;controls.zoomToCursor=false;
+    controls.rotateSpeed=TEMPLE_ATRIUM_CONTROLS.rotateSpeed;controls.zoomSpeed=TEMPLE_ATRIUM_CONTROLS.zoomSpeed;
+    controls.minDistance=TEMPLE_CAMERA_LIMITS.min;controls.maxDistance=TEMPLE_CAMERA_LIMITS.max;
+    controls.minPolarAngle=TEMPLE_CAMERA_LIMITS.minPhi;controls.maxPolarAngle=TEMPLE_CAMERA_LIMITS.maxPhi;
+    controls.mouseButtons={LEFT:T.MOUSE.ROTATE,MIDDLE:T.MOUSE.DOLLY,RIGHT:T.MOUSE.PAN};
+    controls.touches={ONE:T.TOUCH.ROTATE,TWO:T.TOUCH.DOLLY_PAN};
+    camera.position.copy(position);controls.target.copy(center);controls.update();
+    controls.addEventListener('start',()=>options.onStart());controls.addEventListener('change',changedPose);reportPose();
+  }
+  function cancel(){
+    if(disposed)return;
+    clearTimeout(commitTimer);commitTimer=null;changed=false;nativeActive=false;nativeUntil=0;lastPinchWheel=-Infinity;
+    controls.dispose();
+    for(const id of points)try{if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}catch(e){}
+    points.clear();tap=null;lastTap=null;makeControls();
+  }
+  function reset(){if(now()-lastReset<300)return;lastReset=now();options.onReset();}
+  // Tap picking and reset are separate from OrbitControls' camera movement.
+  // Capture listeners also prevent a duplicate native pinch stream reaching it.
+  listen(canvas,'pointerdown',e=>{
+    points.add(e.pointerId);options.onInput?.(e.pointerType==='touch'?'touch':'pointer');canvas.focus?.({preventScroll:true});
+    if(points.size===1)tap={id:e.pointerId,x:e.clientX,y:e.clientY,time:now(),type:e.pointerType,button:e.button,moved:false,multiple:false};
+    else if(tap){tap.multiple=true;lastTap=null;}
+  },true);
+  listen(canvas,'pointermove',e=>{if(tap&&Math.hypot(e.clientX-tap.x,e.clientY-tap.y)>4){tap.moved=true;lastTap=null;}},true);
+  listen(canvas,'pointerup',e=>{
+    points.delete(e.pointerId);
+    if(tap&&tap.id===e.pointerId&&!tap.moved&&!tap.multiple&&(tap.type!=='mouse'||tap.button===0)&&now()-tap.time<600){
+      if(tap.type==='touch'&&lastTap&&now()-lastTap.time<350&&Math.hypot(e.clientX-lastTap.x,e.clientY-lastTap.y)<24){lastTap=null;reset();}
+      else{if(tap.type==='touch')lastTap={time:now(),x:e.clientX,y:e.clientY};options.onPick(e);}
+    }
+    if(points.size===0)tap=null;
+  },true);
+  listen(canvas,'pointercancel',e=>{points.delete(e.pointerId);tap=null;lastTap=null;},true);
+  listen(canvas,'dblclick',e=>{e.preventDefault();reset();});
+  listen(canvas,'keydown',e=>{
+    if(e.ctrlKey||e.metaKey||e.altKey)return;
+    if(e.key==='+'||e.key==='='){e.preventDefault();options.onZoom(TEMPLE_ATRIUM_CONTROLS.zoomIn);}
+    else if(e.key==='-'||e.key==='_'){e.preventDefault();options.onZoom(TEMPLE_ATRIUM_CONTROLS.zoomOut);}
+    else if(e.key==='0'){e.preventDefault();reset();}
+  });
   listen(canvas,'wheel',e=>{
-    e.preventDefault();if(directPointer())return;const delta=templeWheelPixels(e,stage.clientHeight,stage.clientWidth);if(delta.x===0&&delta.y===0)return;
-    if(e.ctrlKey){if(delta.y===0||!ownership.wheel(now()))return;change(options.onStart);options.onInput?.('trackpad');nativeBaseline=null;zoom(Math.exp(Math.max(-100,Math.min(100,delta.y))*.01),e);}
-    else{if(ownership.blocksPan(now()))return;change(options.onStart);options.onInput?.(options.getMode());if(options.getMode()==='mouse')zoom(Math.exp(Math.max(-200,Math.min(200,delta.y))*.0018),e);else pan(-delta.x,-delta.y);}
-    commitSoon();
+    if(nativeActive||now()<nativeUntil||points.size>0){e.preventDefault();e.stopImmediatePropagation();return;}
+    options.onInput?.('pointer');if(e.ctrlKey)lastPinchWheel=now();
+  },{capture:true,passive:false});
+  // Safari may emit gesture events instead of ctrl-wheel. Keep the same
+  // centered scale^1.35 zoom as Atrium and accept only one native stream.
+  listen(canvas,'gesturestart',e=>{
+    e.preventDefault();if(points.size>0||now()-lastPinchWheel<180)return;
+    options.onStart();options.onInput?.('pointer');sync();nativeActive=true;nativeScale=Number.isFinite(e.scale)?Math.max(.001,e.scale):1;
   },{passive:false});
-  listen(canvas,'gesturestart',e=>{e.preventDefault();if(directPointer()||!ownership.nativeStart(now()))return;change(options.onStart);options.onInput?.('trackpad');const rect=canvas.getBoundingClientRect();nativeBaseline=snapshot(Number.isFinite(e.clientX)?e.clientX:rect.left+rect.width/2,Number.isFinite(e.clientY)?e.clientY:rect.top+rect.height/2,1);},{passive:false});
-  listen(canvas,'gesturechange',e=>{e.preventDefault();if(!nativeBaseline||directPointer())return;const scale=Math.max(.001,Number.isFinite(e.scale)?e.scale:1);applyProjected(nativeBaseline,{x:nativeBaseline.x,y:nativeBaseline.y,distance:scale});},{passive:false});
-  listen(canvas,'gestureend',e=>{e.preventDefault();if(nativeBaseline){nativeBaseline=null;ownership.nativeEnd(now());commit();}},{passive:false});
-  listen(window,'blur',()=>clear(true));listen(document,'visibilitychange',()=>{if(document.hidden)clear(true);});
-  return {cancel:clear,dispose(){clear();for(const[target,type,handler,settings]of listeners)target.removeEventListener(type,handler,settings);}};
+  listen(canvas,'gesturechange',e=>{
+    e.preventDefault();if(!nativeActive)return;
+    const scale=Number.isFinite(e.scale)?Math.max(.001,e.scale):1,factor=Math.pow(nativeScale/scale,TEMPLE_ATRIUM_CONTROLS.zoomSpeed);
+    nativeScale=scale;
+    const offset=camera.position.clone().sub(controls.target),length=offset.length();
+    const distance=Math.max(TEMPLE_CAMERA_LIMITS.min,Math.min(TEMPLE_CAMERA_LIMITS.max,length*factor));
+    if(length>1e-8)camera.position.copy(controls.target).addScaledVector(offset,distance/length);
+    controls.update();
+  },{passive:false});
+  listen(canvas,'gestureend',e=>{e.preventDefault();if(nativeActive){nativeActive=false;nativeUntil=now()+180;commit();}},{passive:false});
+  listen(window,'blur',()=>{commit();cancel();});
+  listen(document,'visibilitychange',()=>{if(document.hidden){commit();cancel();}});
+  canvas.tabIndex=0;makeControls();
+  return {cancel,sync,update(){if(!disposed){controls.enableDamping=!options.prefersReduced?.();const updated=controls.update();
+    // Stock change events have a 1mm position threshold. Our dirty renderer
+    // also tracks submillimetre movement, which is many pixels in a 5cm view.
+    const epsilon=Math.max(1e-10,Math.min(.001,2*camera.position.distanceTo(controls.target)*Math.tan(camera.getEffectiveFOV()*Math.PI/360)/Math.max(1,canvas.clientHeight)*.02));
+    if(camera.position.distanceToSquared(reportedPosition)>epsilon*epsilon||controls.target.distanceToSquared(reportedTarget)>epsilon*epsilon){changedPose();return true;}return updated;}},dispose(){if(disposed)return;disposed=true;clearTimeout(commitTimer);controls.dispose();for(const[target,type,fn,settings]of listeners)target.removeEventListener(type,fn,settings);points.clear();}};
 }
 
 /* Linear-light contact shading followed by a perceptual FXAA display resolve.
@@ -3621,7 +3613,7 @@ function rebuildSouthernApproaches(T, ctx) {
   renderer.shadowMap.enabled=true;renderer.shadowMap.autoUpdate=false;renderer.shadowMap.type=T.PCFSoftShadowMap;
   renderer.outputColorSpace=T.SRGBColorSpace;renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=.78;
   renderer.setClearColor(0,0);host.appendChild(renderer.domElement);
-  renderer.domElement.setAttribute('role','img');renderer.domElement.setAttribute('aria-label','3D temple model. Drag to orbit, use two fingers to pan and pinch to zoom. Mouse wheel zooms in Mouse mode. Viewpoint and camera buttons provide alternatives.');
+  renderer.domElement.setAttribute('role','img');renderer.domElement.setAttribute('aria-label','3D temple model. Drag to orbit; scroll or pinch to zoom; right-drag or Shift-drag to pan. On a touchscreen, use one finger to orbit and two to pan and pinch. Double-click or double-tap to reset.');
   const scene=new T.Scene(), camera=new T.PerspectiveCamera(38,1,.08,5000);
   const world=new T.Group();scene.add(world);
   const contactRenderer=createTempleContactRenderer(T,renderer,scene,camera);
@@ -3789,8 +3781,7 @@ function rebuildSouthernApproaches(T, ctx) {
   const select=$('[data-control="landmark"]');for(const[id,l]of Object.entries(landmarks)){const o=document.createElement('option');o.value=id;o.textContent=l.title;select.appendChild(o);}
   const labelIds=['sanctuary','women','altar','stoa','antonia','south'];
   const labels=labelIds.map(id=>{const b=document.createElement('button');b.type='button';b.className='btn text-small temple-label';b.textContent=landmarks[id].title;b.addEventListener('click',()=>{if(state.tour>=0)endTour();chooseLandmark(id,true);});labelLayer.appendChild(b);return{id,el:b,point:new T.Vector3(...landmarks[id].point)};});
-  const defaultNavigation=matchMedia('(pointer:coarse)').matches?'touch':/Mac/i.test(navigator.platform)?'trackpad':'mouse';
-  let state={navigation:defaultNavigation,view:'sanctuary',landmark:'sanctuary',cutaway:false,labels:false,sun:28,tour:-1};
+  let state={view:'sanctuary',landmark:'sanctuary',cutaway:false,labels:false,sun:28,tour:-1};
   let target=new T.Vector3(...views.sanctuary.target),radius=1,theta=0,phi=1,flight=null,dirty=true;
   let navigation=null;
   const prefersReduced=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -3799,7 +3790,7 @@ function rebuildSouthernApproaches(T, ctx) {
   function syncSpherical(){const v=camera.position.clone().sub(target);radius=v.length();theta=radius>1e-8?Math.atan2(v.x,v.z):0;phi=radius>1e-8?Math.acos(T.MathUtils.clamp(v.y/radius,-1,1)):.025;}
   function stopFlight(){if(flight){syncSpherical();flight=null;}}
   function cameraFromSpherical(){const constrained=templeConstrainCameraSphere({radius,phi,targetY:target.y},cameraFloors[state.view]??-24.75);radius=constrained.radius;phi=constrained.phi;target.y=constrained.targetY;camera.position.set(target.x+radius*Math.sin(phi)*Math.sin(theta),target.y+radius*Math.cos(phi),target.z+radius*Math.sin(phi)*Math.cos(theta));camera.lookAt(target);dirty=true;}
-  function setView(id,animate=true){navigation?.cancel();const narrow=stage.clientWidth<520;const v=id==='sanctuary'&&narrow?{eye:[44,32,13],target:[-36,29,0]}:(views[id]||views.overview);state.view=id;const aspect=stage.clientWidth/stage.clientHeight,fit=Math.max(1,(id==='sanctuary'&&narrow?1.2:id==='overview'?1.4:1)/aspect),fitted=templeFitCameraPreset(v.eye,v.target,fit,cameraFloors[id]??-24.75),toTarget=new T.Vector3(...fitted.target),to=new T.Vector3(...fitted.eye);if(animate&&!prefersReduced())flight={start:performance.now(),from:camera.position.clone(),fromTarget:target.clone(),to,toTarget};else{flight=null;camera.position.copy(to);target.copy(toTarget);camera.lookAt(target);syncSpherical();}$$('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===id)));dirty=true;}
+  function setView(id,animate=true){navigation?.cancel();const narrow=stage.clientWidth<520;const v=id==='sanctuary'&&narrow?{eye:[44,32,13],target:[-36,29,0]}:(views[id]||views.overview);state.view=id;const aspect=stage.clientWidth/stage.clientHeight,fit=Math.max(1,(id==='sanctuary'&&narrow?1.2:id==='overview'?1.4:1)/aspect),fitted=templeFitCameraPreset(v.eye,v.target,fit,cameraFloors[id]??-24.75),toTarget=new T.Vector3(...fitted.target),to=new T.Vector3(...fitted.eye);if(animate&&!prefersReduced())flight={start:performance.now(),from:camera.position.clone(),fromTarget:target.clone(),to,toTarget};else{flight=null;camera.position.copy(to);target.copy(toTarget);camera.lookAt(target);syncSpherical();}$$('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===id)));navigation?.sync();dirty=true;}
   const localSession=Math.random().toString(36).slice(2);
   function save(){try{window.openai?.setWidgetState({modelContent:{period:'Herodian Second Temple, c. 30 CE',selectedLandmark:landmarks[state.landmark]?.title,cutaway:state.cutaway},privateContent:{...state,_session:localSession,cameraAspect:camera.aspect,camera:camera.position.toArray(),target:target.toArray()}})?.catch(()=>{});}catch(e){}}
   function setCutaway(value){sun.shadow.needsUpdate=true;state.cutaway=Boolean(value);for(const m of cutawayParts)if(m)m.visible=!state.cutaway;$('[data-control="cutaway"]').checked=state.cutaway;dirty=true;}
@@ -3821,20 +3812,20 @@ function rebuildSouthernApproaches(T, ctx) {
   $('[data-control="sun"]').addEventListener('input',e=>setSun(e.target.value));$('[data-control="sun"]').addEventListener('change',save);
   $('[data-action="tour"]').addEventListener('click',()=>state.tour<0?tourStop(0):endTour());
   $('[data-action="previous"]').addEventListener('click',()=>tourStop(state.tour-1));$('[data-action="next"]').addEventListener('click',()=>state.tour===stops.length-1?endTour():tourStop(state.tour+1));
-  $$('[data-camera]').forEach(b=>b.addEventListener('click',()=>{stopFlight();const a=b.dataset.camera;if(a==='left')theta-=.2;if(a==='right')theta+=.2;if(a==='up')phi-=.12;if(a==='down')phi+=.12;if(a==='in')radius*=.8;if(a==='out')radius*=1.25;cameraFromSpherical();save();}));
-  $('[data-action="reset"]').addEventListener('click',()=>{stopFlight();setView(state.view);save();});
+  function moveCamera(factor,action){stopFlight();navigation?.cancel();if(action==='left')theta-=.2;if(action==='right')theta+=.2;if(action==='up')phi-=.12;if(action==='down')phi+=.12;radius*=factor;cameraFromSpherical();navigation?.sync();save();}
+  function resetView(){stopFlight();setView(state.view,false);save();}
+  $$('[data-camera]').forEach(b=>b.addEventListener('click',()=>{const a=b.dataset.camera;moveCamera(a==='in'?TEMPLE_ATRIUM_CONTROLS.zoomIn:a==='out'?TEMPLE_ATRIUM_CONTROLS.zoomOut:1,a);}));
+  $('[data-action="reset"]').addEventListener('click',resetView);
   const ray=new T.Raycaster(),mouse=new T.Vector2();
   function pick(e){const rect=renderer.domElement.getBoundingClientRect();mouse.set((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1);ray.setFromCamera(mouse,camera);const hits=ray.intersectObjects(pickables,true);for(const hit of hits){let obj=hit.object,visible=true;for(let p=obj;p;p=p.parent)if(!p.visible)visible=false;if(!visible)continue;let id;while(obj){if(obj.userData.landmark){id=obj.userData.landmark;break;}obj=obj.parent;}if(id){if(state.tour>=0)endTour();chooseLandmark(id,false);break;}}}
-  function renderGestureHelp(kind){$('[data-navigation-help]').textContent=kind==='mouse'?'Left-drag to rotate · Right/middle-drag to move · Wheel to zoom':kind==='touch'?'1 finger to rotate · 2 fingers to move · Pinch to zoom':'Click-drag to rotate · 2 fingers to move · Pinch to zoom';}
-  function setNavigationMode(mode){state.navigation=['trackpad','mouse','touch'].includes(mode)?mode:defaultNavigation;$('[data-control="navigation"]').value=state.navigation;renderGestureHelp(state.navigation);navigation?.cancel();}
-  navigation=createTempleNavigation(T,{canvas:renderer.domElement,camera,stage,getMode:()=>state.navigation,getPose:()=>({radius,theta,phi,target:target.clone()}),onStart:stopFlight,onCommit:save,onPick:pick,onInput:renderGestureHelp,
-    orbit(dx,dy){theta-=dx*.007;phi-=dy*.006;cameraFromSpherical();},
-    applyPose(pose){const rawY=pose.target.y,oldPhi=phi;radius=pose.radius;target.copy(pose.target);target.y=T.MathUtils.clamp(target.y,-24,100);cameraFromSpherical();return target.y!==rawY||phi!==oldPhi;}
+  function renderGestureHelp(kind){$('[data-navigation-help]').textContent=kind==='touch'?'1 finger to orbit · 2 fingers to pan/pinch · Double-tap to reset':'Drag to orbit · Scroll/pinch to zoom · Shift/right-drag to pan';}
+  navigation=createTempleNavigation(T,{canvas:renderer.domElement,camera,stage,getPose:()=>({radius,theta,phi,target:target.clone()}),onStart:stopFlight,onCommit:save,onPick:pick,onInput:renderGestureHelp,onReset:resetView,onZoom:factor=>moveCamera(factor),prefersReduced,
+    onChangePose(center){target.copy(center);syncSpherical();target.y=T.MathUtils.clamp(target.y,-24,100);cameraFromSpherical();center.copy(target);}
   });
-  $('[data-control="navigation"]').addEventListener('change',e=>{setNavigationMode(e.target.value);save();});setNavigationMode(state.navigation);
-  function resize(){navigation?.cancel();const r=stage.getBoundingClientRect();if(r.width<=0)return;renderer.setSize(r.width,r.height);contactRenderer.resize(r.width,r.height);camera.aspect=r.width/r.height;camera.updateProjectionMatrix();dirty=true;}
+  renderGestureHelp(matchMedia('(pointer:coarse)').matches?'touch':'pointer');
+  function resize(){navigation?.cancel();const r=stage.getBoundingClientRect();if(r.width<=0)return;renderer.setSize(r.width,r.height);contactRenderer.resize(r.width,r.height);camera.aspect=r.width/r.height;camera.updateProjectionMatrix();navigation?.sync();dirty=true;}
   const resizeObserver=new ResizeObserver(resize);resizeObserver.observe(stage);
-  function applySaved(raw){const s=raw?.privateContent;if(!s||typeof s!=='object'||s._session===localSession)return;setNavigationMode(s.navigation||defaultNavigation);state.labels=typeof s.labels==='boolean'?s.labels:false;$('[data-control="labels"]').checked=state.labels;setCutaway(s.cutaway);setSun(typeof s.sun==='number'?s.sun:28);chooseLandmark(s.landmark||'sanctuary',false,false);setView(views[s.view]?s.view:'sanctuary',false);if((!s.cameraAspect||Math.abs(s.cameraAspect-camera.aspect)<.25)&&Array.isArray(s.camera)&&s.camera.length===3&&s.camera.every(Number.isFinite)&&Array.isArray(s.target)&&s.target.length===3&&s.target.every(Number.isFinite)){camera.position.fromArray(s.camera);target.fromArray(s.target);camera.lookAt(target);syncSpherical();cameraFromSpherical();}state.tour=Number.isInteger(s.tour)&&s.tour>=0&&s.tour<stops.length?s.tour:-1;renderTourUI();dirty=true;}
+  function applySaved(raw){const s=raw?.privateContent;if(!s||typeof s!=='object'||s._session===localSession)return;state.labels=typeof s.labels==='boolean'?s.labels:false;$('[data-control="labels"]').checked=state.labels;setCutaway(s.cutaway);setSun(typeof s.sun==='number'?s.sun:28);chooseLandmark(s.landmark||'sanctuary',false,false);setView(views[s.view]?s.view:'sanctuary',false);if((!s.cameraAspect||Math.abs(s.cameraAspect-camera.aspect)<.25)&&Array.isArray(s.camera)&&s.camera.length===3&&s.camera.every(Number.isFinite)&&Array.isArray(s.target)&&s.target.length===3&&s.target.every(Number.isFinite)){camera.position.fromArray(s.camera);target.fromArray(s.target);camera.lookAt(target);syncSpherical();cameraFromSpherical();navigation?.sync();}state.tour=Number.isInteger(s.tour)&&s.tour>=0&&s.tour<stops.length?s.tour:-1;renderTourUI();dirty=true;}
   resize();setView('sanctuary',false);setSun(28);chooseLandmark('sanctuary',false,false);applySaved(window.openai?.widgetState);const handleGlobalState=e=>{if(e.detail?.globals?.widgetState)applySaved(e.detail.globals.widgetState);};window.addEventListener('openai:set_globals',handleGlobalState);
   function updateTheme(){palette=colors();highlight(state.landmark);dirty=true;}
   const schemeQuery=matchMedia('(prefers-color-scheme: dark)');schemeQuery.addEventListener('change',updateTheme);const themeObserver=new MutationObserver(updateTheme);themeObserver.observe(document.documentElement,{attributes:true,attributeFilter:['class','style','data-theme']});
@@ -3842,7 +3833,7 @@ function rebuildSouthernApproaches(T, ctx) {
   function drawLabels(){const w=stage.clientWidth,h=stage.clientHeight,occupied=[];const sorted=[...labels].sort((a,b)=>Number(b.id===state.landmark)-Number(a.id===state.landmark));for(const l of sorted){const selected=l.id===state.landmark,near=radius<125;l.el.hidden=false;const lw=l.el.offsetWidth,lh=l.el.offsetHeight;projected.copy(l.point).project(camera);const x=(projected.x+1)*w/2,y=(1-projected.y)*h/2;let visible=state.labels&&projected.z<1&&projected.z>-1&&x>lw/2+4&&x<w-lw/2-4&&y>lh+4&&y<h-30&&(!near||selected||['sanctuary','women','altar'].includes(l.id));if(visible){const bound=[x-lw/2-4,y-lh-4,x+lw/2+4,y+4];if(occupied.some(b=>bound[0]<b[2]&&bound[2]>b[0]&&bound[1]<b[3]&&bound[3]>b[1]))visible=false;else occupied.push(bound);}l.el.hidden=!visible;if(visible){l.el.style.left=x+'px';l.el.style.top=y+'px';l.el.setAttribute('aria-pressed',String(selected));}}labelLayer.setAttribute('aria-hidden',String(!state.labels));const north=new T.Vector3(0,0,-1).applyQuaternion(camera.quaternion.clone().invert());const angle=Math.atan2(north.x,-north.y)*180/Math.PI;$('.temple-orientation').textContent='N '+(Math.abs(angle)<30?'↑':angle>30&&angle<150?'→':angle< -30&&angle> -150?'←':'↓')+' · east-facing sanctuary';}
   let visible=true;const intersectionObserver=new IntersectionObserver(entries=>{visible=entries[0].isIntersecting;if(visible)dirty=true;});intersectionObserver.observe(stage);
   function dispose(){resizeObserver.disconnect();intersectionObserver.disconnect();themeObserver.disconnect();schemeQuery.removeEventListener('change',updateTheme);window.removeEventListener('openai:set_globals',handleGlobalState);navigation?.dispose();const geometries=new Set(),materials=new Set(Object.values(mats)),textures=new Set(textureObjects);scene.traverse(o=>{if(o.geometry)geometries.add(o.geometry);if(o.material)for(const m of(Array.isArray(o.material)?o.material:[o.material]))materials.add(m);});for(const m of materials){for(const value of Object.values(m))if(value?.isTexture)textures.add(value);m.dispose();}for(const g of geometries)g.dispose();for(const t of textures)t.dispose();materialRealism.dispose();contactRenderer.dispose();envTarget.dispose();renderer.dispose();}
-  function frame(now){if(!root.isConnected){dispose();return;}requestAnimationFrame(frame);if(!visible)return;if(flight){const t=Math.min(1,(now-flight.start)/850),k=t*t*(3-2*t);camera.position.lerpVectors(flight.from,flight.to,k);target.lerpVectors(flight.fromTarget,flight.toTarget,k);camera.lookAt(target);dirty=true;if(t===1){flight=null;syncSpherical();save();}}if(dirty){const near=templeCameraNearPlane(camera.position.distanceTo(target));if(camera.near!==near){camera.near=near;camera.updateProjectionMatrix();}const columnDetail=world.userData.updateTempleColumnDetail?.(camera);if(columnDetail?.changed)sun.shadow.needsUpdate=true;if(columnDetail)root.dataset.columnDetail=JSON.stringify(columnDetail);updateShadow();renderer.info.reset();contactRenderer.render();drawLabels();loading.hidden=true;root.dataset.ready='true';root.dataset.glError=String(renderer.getContext().getError());root.dataset.contextLost=String(renderer.getContext().isContextLost());root.dataset.camera=JSON.stringify({view:state.view,position:camera.position.toArray(),target:target.toArray(),radius,phi,theta,near:camera.near});root.dataset.drawCalls=String(renderer.info.render.calls);root.dataset.triangles=String(renderer.info.render.triangles);dirty=false;}}
+  function frame(now){if(!root.isConnected){dispose();return;}requestAnimationFrame(frame);if(!visible)return;if(flight){const t=Math.min(1,(now-flight.start)/850),k=t*t*(3-2*t);camera.position.lerpVectors(flight.from,flight.to,k);target.lerpVectors(flight.fromTarget,flight.toTarget,k);camera.lookAt(target);syncSpherical();navigation?.sync();dirty=true;if(t===1){flight=null;save();}}else navigation?.update();if(dirty){const near=templeCameraNearPlane(camera.position.distanceTo(target));if(camera.near!==near){camera.near=near;camera.updateProjectionMatrix();}const columnDetail=world.userData.updateTempleColumnDetail?.(camera);if(columnDetail?.changed)sun.shadow.needsUpdate=true;if(columnDetail)root.dataset.columnDetail=JSON.stringify(columnDetail);updateShadow();renderer.info.reset();contactRenderer.render();drawLabels();loading.hidden=true;root.dataset.ready='true';root.dataset.glError=String(renderer.getContext().getError());root.dataset.contextLost=String(renderer.getContext().isContextLost());root.dataset.camera=JSON.stringify({view:state.view,position:camera.position.toArray(),target:target.toArray(),radius,phi,theta,near:camera.near});root.dataset.drawCalls=String(renderer.info.render.calls);root.dataset.triangles=String(renderer.info.render.triangles);dirty=false;}}
   resize();loading.textContent='Preparing stone, gold and daylight…';root.dataset.ready='preparing';root.dataset.meshes=String(boxCache.size);
   Promise.all([materialRealism.ready,environmentReady]).then(()=>{world.userData.updateTempleColumnDetail?.(camera);updateShadow();return contactRenderer.prepare();}).catch(()=>{root.dataset.shaderPreparation='fallback';}).then(()=>{if(!root.isConnected){dispose();return;}dirty=true;requestAnimationFrame(frame);});
 })();
