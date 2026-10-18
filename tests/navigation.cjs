@@ -4,14 +4,43 @@ class V3{constructor(x=0,y=0,z=0){Object.assign(this,{x,y,z});}clone(){return ne
 class Canvas extends EventTarget{constructor(){super();this.ids=new Set();}getBoundingClientRect(){return{left:0,top:0,width:800,height:500};}setPointerCapture(id){this.ids.add(id);}hasPointerCapture(id){return this.ids.has(id);}releasePointerCapture(id){this.ids.delete(id);}}
 const close=(a,b,eps=1e-9)=>assert.ok(Math.abs(a-b)<eps,`${a} != ${b}`);
 function harness(mode='trackpad'){
- let time=0,picks=0,commits=0,orbitCalls=[],pose={radius:100,theta:0,phi:1,target:new V3()},canvas=new Canvas(),win=new EventTarget(),doc=new EventTarget(),nextTimer=0;
+ let time=0,picks=0,commits=0,applyCalls=0,inputs=[],orbitCalls=[],pose={radius:100,theta:0,phi:1,target:new V3()},canvas=new Canvas(),win=new EventTarget(),doc=new EventTarget(),nextTimer=0;
  const timers=new Map(),setTimer=(fn,delay)=>{const id=++nextTimer;timers.set(id,{fn,at:time+delay});return id;};
  const context=vm.createContext({performance:{now:()=>time},window:win,document:doc,setTimeout:setTimer,clearTimeout:id=>timers.delete(id),console});
  vm.runInContext(fs.readFileSync(require.resolve('../source/details/navigation.js'),'utf8'),context);
- const nav=context.createTempleNavigation({Vector3:V3},{canvas,camera:{quaternion:{},getEffectiveFOV:()=>42},stage:{clientHeight:500,clientWidth:800},getMode:()=>mode,getPose:()=>({...pose,target:pose.target.clone()}),onStart(){},onCommit(){commits++;},onPick(){picks++;},orbit(dx,dy){orbitCalls.push([dx,dy]);pose.theta-=dx*.007;pose.phi-=dy*.006;},applyPose(p){pose={...pose,radius:p.radius,target:p.target.clone()};return false;}});
+ const nav=context.createTempleNavigation({Vector3:V3},{canvas,camera:{quaternion:{},getEffectiveFOV:()=>42},stage:{clientHeight:500,clientWidth:800},getMode:()=>mode,getPose:()=>({...pose,target:pose.target.clone()}),onStart(){},onInput(kind){inputs.push(kind);},onCommit(){commits++;},onPick(){picks++;},orbit(dx,dy){orbitCalls.push([dx,dy]);pose.theta-=dx*.007;pose.phi-=dy*.006;},applyPose(p){applyCalls++;pose={...pose,radius:p.radius,target:p.target.clone()};return false;}});
  const event=(type,props={})=>{const e=new Event(type,{cancelable:true});Object.assign(e,props);canvas.dispatchEvent(e);return e;};
  const pointer=(type,id,x,y,extra={})=>event(type,{pointerId:id,pointerType:'touch',clientX:x,clientY:y,button:0,buttons:type==='pointerup'?0:1,...extra});
- return{context,nav,event,pointer,win,doc,get pose(){return pose;},get picks(){return picks;},get commits(){return commits;},orbitCalls,tick(n){time+=n;for(const[id,timer]of[...timers])if(timer.at<=time){timers.delete(id);timer.fn();}}};
+ return{context,nav,event,pointer,win,doc,inputs,get pose(){return pose;},get picks(){return picks;},get commits(){return commits;},get applyCalls(){return applyCalls;},orbitCalls,tick(n){time+=n;for(const[id,timer]of[...timers])if(timer.at<=time){timers.delete(id);timer.fn();}}};
+}
+// Finger/pen tap jitter does not rotate; a deliberate drag starts predictably.
+for(const pointerType of['touch','pen']){
+ const h=harness('mouse');h.pointer('pointerdown',1,400,250,{pointerType});h.pointer('pointermove',1,402,251,{pointerType});h.pointer('pointermove',1,400,250,{pointerType});h.pointer('pointerup',1,400,250,{pointerType});assert.equal(h.orbitCalls.length,0);assert.equal(h.picks,1);assert.deepEqual(h.inputs,['touch']);
+ h.pointer('pointerdown',2,400,250,{pointerType});h.pointer('pointermove',2,402,251,{pointerType});h.pointer('pointermove',2,406,250,{pointerType});assert.deepEqual(h.orbitCalls,[[6,0]]);h.pointer('pointerup',2,406,250,{pointerType});assert.equal(h.picks,1);h.nav.dispose();
+}
+// Lifting a finger re-arms single-finger slop without allowing an accidental tap.
+{
+ const h=harness();h.pointer('pointerdown',1,300,250);h.pointer('pointerdown',2,500,250);h.pointer('pointermove',1,280,250);h.pointer('pointerup',1,280,250);
+ h.pointer('pointermove',2,503,250);assert.equal(h.orbitCalls.length,0);h.pointer('pointermove',2,506,250);assert.deepEqual(h.orbitCalls,[[6,0]]);h.pointer('pointerup',2,506,250);assert.equal(h.picks,0);h.nav.dispose();
+}
+// Stationary events and an unused third finger cannot create extra transforms.
+{
+ const h=harness();h.pointer('pointerdown',1,300,250);h.pointer('pointerdown',2,500,250);h.pointer('pointermove',1,300,250);h.pointer('pointerdown',3,400,300);h.pointer('pointermove',3,420,320);h.pointer('pointerup',3,420,320);assert.equal(h.applyCalls,0);
+ h.pointer('pointermove',1,200,250);h.pointer('pointermove',2,600,250);close(h.pose.radius,50);close(h.pose.target.x,0);h.nav.dispose();
+}
+// Direct fingers own the canvas until released; synthetic/mixed streams stay out.
+{
+ const h=harness('mouse');h.pointer('pointerdown',1,400,250);h.pointer('pointerdown',2,450,250,{pointerType:'mouse'});h.pointer('pointermove',2,470,250,{pointerType:'mouse'});h.event('wheel',{deltaY:-50,deltaMode:0,ctrlKey:true});h.event('gesturestart',{scale:1});h.event('gesturechange',{scale:2});assert.equal(h.orbitCalls.length,0);close(h.pose.radius,100);assert.deepEqual(h.inputs,['touch']);
+ h.pointer('pointerup',1,400,250);h.event('wheel',{deltaY:10,deltaMode:0,ctrlKey:false,clientX:400,clientY:250});assert.ok(h.pose.radius>100);assert.deepEqual(h.inputs,['touch','mouse']);h.nav.dispose();
+}
+// Input hints reflect accepted pinch streams without changing the chosen mode.
+{
+ const h=harness('mouse');h.event('gesturestart',{clientX:400,clientY:250,scale:1});h.event('wheel',{deltaY:-50,deltaMode:0,ctrlKey:true});assert.deepEqual(h.inputs,['trackpad']);h.event('gestureend',{});h.tick(200);h.event('wheel',{deltaY:10,deltaMode:0,ctrlKey:false,clientX:400,clientY:250});assert.equal(h.inputs.at(-1),'mouse');h.nav.dispose();
+ const w=harness('mouse');w.event('wheel',{deltaY:-20,deltaMode:0,ctrlKey:true});w.event('gesturestart',{scale:1});assert.deepEqual(w.inputs,['trackpad']);w.nav.dispose();
+}
+// A lost mouse release cannot leave a ghost drag after buttons return to zero.
+{
+ const h=harness('mouse');h.pointer('pointerdown',1,400,250,{pointerType:'mouse'});h.pointer('pointermove',1,410,250,{pointerType:'mouse',buttons:0});h.pointer('pointermove',1,450,250,{pointerType:'mouse',buttons:0});assert.equal(h.orbitCalls.length,0);assert.equal(h.picks,0);h.nav.dispose();
 }
 // Pan and zoom reach the same final pose regardless of pointer event ordering.
 for(const order of [[1,2],[2,1]]){
