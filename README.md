@@ -10,6 +10,7 @@ Read [HANDOFF.md](HANDOFF.md) for the current state, local startup steps, constr
 
 - Pinch to zoom and move two fingers together to pan on a trackpad or touchscreen. Click-drag to orbit on a trackpad; drag with one finger on a touchscreen. Pan and pinch work together, centered on your fingers.
 - Select Mouse for left-drag orbit, right/middle-drag pan and wheel zoom. Your navigation mode is saved.
+- Zoom down to a 5 cm orbit radius for close inspection—30 times closer than the previous limit—with near clipping that follows the camera.
 - A short touch movement threshold keeps a tap from accidentally rotating the model. The gesture hint follows the input you use; Reset view restores the current viewpoint.
 - Inspect 24 landmarks and a 16-stop guided tour.
 - Reveal the sanctuary with a cutaway and inspect its furnishings up close.
