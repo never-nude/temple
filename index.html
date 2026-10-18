@@ -33,10 +33,11 @@ window.openai={widgetState:savedModel,setWidgetState(value){this.widgetState=val
     <button class="btn" type="button" data-view="court" aria-pressed="false">Inner courts</button>
     <button class="btn" type="button" data-view="interior" aria-pressed="false">Inside sanctuary</button>
     <button class="btn" type="button" data-view="stoa" aria-pressed="false">Royal Stoa</button>
-    <button class="btn" type="button" data-view="capital" aria-pressed="false">Column detail</button>
+    <button class="btn" type="button" data-view="facade" aria-pressed="false">Temple façade</button>
     <button class="btn" type="button" data-view="gateway" aria-pressed="false">Southern gates</button>
   </div>
-  <div class="temple-stage" aria-label="Interactive 3D reconstruction of the Second Temple complex">
+  <div class="temple-gesture-guide"><span class="text-small text-muted" id="temple-gesture-help" data-navigation-help>Click-drag to rotate · 2 fingers to move · Pinch to zoom</span><button class="btn" type="button" data-action="reset" aria-label="Reset view">Reset view</button></div>
+  <div class="temple-stage" aria-label="Interactive 3D reconstruction of the Second Temple complex" aria-describedby="temple-gesture-help">
     <div class="temple-canvas"></div><div class="temple-labels" aria-hidden="true"></div>
     <span class="temple-orientation text-small">N ↑ · east-facing sanctuary</span>
     <span class="temple-loading" role="status">Building the temple…</span>
@@ -55,7 +56,6 @@ window.openai={widgetState:savedModel,setWidgetState(value){this.widgetState=val
   <div class="temple-detail" aria-live="polite"><span data-detail-title>Temple Mount</span><span class="text-muted" data-detail-text>A monumental raised precinct surrounding the sanctuary and its courts.</span></div>
   <div class="temple-navigation">
     <label class="text-small text-muted">Controls <select class="form-select" data-control="navigation" aria-label="Navigation device"><option value="trackpad">Trackpad</option><option value="mouse">Mouse</option><option value="touch">Touchscreen</option></select></label>
-    <span class="text-small text-muted" data-navigation-help>Click-drag to orbit · two fingers to pan · pinch to zoom</span>
   </div>
   <div class="viz-row temple-camera" role="group" aria-label="Camera controls">
     <button class="btn" type="button" data-camera="left" aria-label="Rotate left">↶</button>
@@ -83,7 +83,7 @@ window.openai={widgetState:savedModel,setWidgetState(value){this.widgetState=val
 #temple-explorer .temple-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
 #temple-explorer .temple-detail{display:flex;gap:8px;flex-wrap:wrap;min-height:46px;align-items:baseline;padding:10px 0}
 #temple-explorer [data-detail-title]{font-weight:500}
-#temple-explorer .temple-navigation{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:12px 0}#temple-explorer .temple-navigation label{display:flex;align-items:center;gap:8px}#temple-explorer .temple-navigation select{width:auto;min-width:118px}#temple-explorer .temple-camera{justify-content:flex-start}
+#temple-explorer .temple-gesture-guide{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:4px 0 8px;min-height:44px}#temple-explorer .temple-gesture-guide>span{line-height:1.5;min-width:0}#temple-explorer .temple-gesture-guide .btn{flex-shrink:0;padding:8px 12px}#temple-explorer .temple-navigation{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:12px 0}#temple-explorer .temple-navigation label{display:flex;align-items:center;gap:8px}#temple-explorer .temple-navigation select{width:auto;min-width:118px}#temple-explorer .temple-camera{justify-content:flex-start}
 #temple-explorer .temple-options{margin-bottom:10px}
 @media(max-width:520px){#temple-explorer .temple-stage{height:clamp(380px,58svh,500px)}#temple-explorer .temple-fields{grid-template-columns:1fr;gap:10px}#temple-explorer .temple-heading{align-items:flex-start;gap:4px}#temple-explorer .temple-camera>span{flex-basis:100%}}
 </style>
@@ -1360,196 +1360,6 @@ function refineTempleSanctuary(T, ctx) {
  * resize() accepts CSS pixels, matching WebGLRenderer.setSize().
  * Older / unsupported GPUs keep the renderer's normal direct-render path.
  */
-function createTempleContactRenderer(T, renderer, scene, camera) {
-  const supported = !new URLSearchParams(location.search).has('direct') && renderer.capabilities.isWebGL2 && renderer.extensions.has('EXT_color_buffer_float');
-  const drawingSize = new T.Vector2();
-  let disposed = false;
-  if (!supported) return {
-    render() { if (!disposed) renderer.render(scene, camera); },
-    resize() {},
-    dispose() { disposed = true; }
-  };
-
-  renderer.getDrawingBufferSize(drawingSize);
-  const target = new T.WebGLRenderTarget(Math.max(1, drawingSize.x), Math.max(1, drawingSize.y), {
-    type: T.HalfFloatType,
-    format: T.RGBAFormat,
-    minFilter: T.LinearFilter,
-    magFilter: T.LinearFilter,
-    depthBuffer: true,
-    stencilBuffer: false
-  });
-  target.texture.name = 'Temple linear HDR scene';
-  target.texture.colorSpace = T.LinearSRGBColorSpace;
-  target.texture.generateMipmaps = false;
-  target.depthTexture = new T.DepthTexture(target.width, target.height, T.UnsignedIntType);
-  target.depthTexture.name = 'Temple contact depth';
-  target.depthTexture.format = T.DepthFormat;
-  target.depthTexture.minFilter = target.depthTexture.magFilter = T.NearestFilter;
-
-  const uniforms = {
-    tColor: { value: target.texture },
-    tDepth: { value: target.depthTexture },
-    resolution: { value: new T.Vector2(target.width, target.height) },
-    inverseProjection: { value: camera.projectionMatrixInverse.clone() },
-    projectionScale: { value: camera.projectionMatrix.elements[5] },
-    toneBackground: { value: 1 }
-  };
-  const material = new T.ShaderMaterial({
-    uniforms,
-    depthTest: false,
-    depthWrite: false,
-    blending: T.NoBlending,
-    toneMapped: true,
-    vertexShader: `
-      varying vec2 vUv;
-      void main() {
-        vUv = uv;
-        gl_Position = vec4( position.xy, 0.0, 1.0 );
-      }
-    `,
-    fragmentShader: `
-      uniform sampler2D tColor;
-      uniform sampler2D tDepth;
-      uniform vec2 resolution;
-      uniform mat4 inverseProjection;
-      uniform float projectionScale;
-      uniform float toneBackground;
-      varying vec2 vUv;
-      #include <common>
-
-      vec3 viewPosition( vec2 uv, float depth ) {
-        vec4 p = inverseProjection * vec4( uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0 );
-        return p.xyz / p.w;
-      }
-
-      float luma( vec3 c ) { return dot( c, vec3( 0.299, 0.587, 0.114 ) ); }
-
-      // A small FXAA resolve restores smooth silhouettes because the scene is
-      // rendered to a non-multisampled, readable depth attachment.
-      vec3 sceneColor( vec2 uv ) {
-        vec2 texel = 1.0 / resolution;
-        vec3 c = texture2D( tColor, uv ).rgb;
-        vec3 nw = texture2D( tColor, uv + vec2(-1.0, 1.0) * texel ).rgb;
-        vec3 ne = texture2D( tColor, uv + vec2( 1.0, 1.0) * texel ).rgb;
-        vec3 sw = texture2D( tColor, uv + vec2(-1.0,-1.0) * texel ).rgb;
-        vec3 se = texture2D( tColor, uv + vec2( 1.0,-1.0) * texel ).rgb;
-        float lc = luma(c), lnw = luma(nw), lne = luma(ne), lsw = luma(sw), lse = luma(se);
-        float lo = min(lc, min(min(lnw,lne), min(lsw,lse)));
-        float hi = max(lc, max(max(lnw,lne), max(lsw,lse)));
-        if (hi - lo < max(.035, hi * .12)) return c;
-        vec2 direction = vec2(-((lnw+lne)-(lsw+lse)), (lnw+lsw)-(lne+lse));
-        float reduce = max((lnw+lne+lsw+lse) * .0078125, .0078125);
-        direction = clamp(direction / (min(abs(direction.x),abs(direction.y)) + reduce), vec2(-4.0), vec2(4.0)) * texel;
-        vec3 a = .5 * (texture2D(tColor,uv-direction/6.0).rgb + texture2D(tColor,uv+direction/6.0).rgb);
-        vec3 b = a * .5 + .25 * (texture2D(tColor,uv-direction*.5).rgb + texture2D(tColor,uv+direction*.5).rgb);
-        float lb = luma(b);
-        return lb < lo || lb > hi ? a : b;
-      }
-
-      float contactShading( float depth ) {
-        if (depth >= .9999999) return 1.0;
-        vec3 p = viewPosition(vUv,depth);
-        vec3 n = normalize(cross(dFdx(p),dFdy(p)));
-        if (dot(n,-p) < 0.0) n = -n;
-
-        // The radius remains 1.15 physical metres. At an overview distance the
-        // effect naturally fades to subpixels rather than making dark outlines.
-        float radius = 1.15;
-        float pixelRadius = min(18.0, radius * projectionScale * resolution.y * .5 / max(.1,-p.z));
-        if (pixelRadius < 1.0) return 1.0;
-        float visible = smoothstep(1.0,2.5,pixelRadius);
-        float occlusion = 0.0;
-        for (int i=0; i<12; i++) {
-          float fi = float(i);
-          float angle = fi * 2.39996323 + .42;
-          float spiral = sqrt((fi + .55) / 12.0);
-          vec2 sampleUv = vUv + vec2(cos(angle),sin(angle)) * pixelRadius * spiral / resolution;
-          if (sampleUv.x <= 0.0 || sampleUv.x >= 1.0 || sampleUv.y <= 0.0 || sampleUv.y >= 1.0) continue;
-          float sd = texture2D(tDepth,sampleUv).r;
-          if (sd >= .9999999) continue;
-          vec3 delta = viewPosition(sampleUv,sd) - p;
-          float distanceToSurface = length(delta);
-          float range = 1.0 - smoothstep(radius*.25,radius,distanceToSurface);
-          float horizon = max(0.0,dot(n,delta / max(distanceToSurface,.0001)) - .25);
-          float selfBias = smoothstep(.06,.16,distanceToSurface);
-          occlusion += horizon * range * selfBias;
-        }
-        // This is a small contact correction, capped at 18%, not a broad
-        // artificial shadow. Sunlight still supplies the principal modeling.
-        return 1.0 - min(.18,occlusion * .18) * visible;
-      }
-
-      void main() {
-        vec4 original = texture2D(tColor,vUv);
-        float depth = texture2D(tDepth,vUv).r;
-        gl_FragColor = vec4(sceneColor(vUv) * contactShading(depth),original.a);
-        // Offscreen rendering in r160 is linear and skips tone mapping. Apply
-        // the renderer's ACES / exposure once, here, before its output transfer.
-        if (depth < .9999999 || toneBackground > .5) {
-          #include <tonemapping_fragment>
-        }
-        #include <colorspace_fragment>
-      }
-    `
-  });
-  const geometry = new T.PlaneGeometry(2, 2);
-  const quad = new T.Mesh(geometry, material);
-  quad.frustumCulled = false;
-  const postScene = new T.Scene();
-  postScene.add(quad);
-  const postCamera = new T.Camera();
-  const viewport = new T.Vector4(), scissor = new T.Vector4();
-
-  function resize(w, h) {
-    if (disposed) return;
-    const pixelRatio = renderer.getPixelRatio();
-    const width = Math.max(1, Math.round(w * pixelRatio)), height = Math.max(1, Math.round(h * pixelRatio));
-    if (target.width !== width || target.height !== height) target.setSize(width, height);
-    uniforms.resolution.value.set(width, height);
-  }
-  function render() {
-    if (disposed) return;
-    // Let any future immersive renderer use its own XR framebuffer and cameras.
-    if (renderer.xr && renderer.xr.isPresenting) { renderer.render(scene, camera); return; }
-    renderer.getDrawingBufferSize(drawingSize);
-    if (target.width !== drawingSize.x || target.height !== drawingSize.y) {
-      target.setSize(Math.max(1,drawingSize.x),Math.max(1,drawingSize.y));
-      uniforms.resolution.value.copy(drawingSize);
-    }
-    uniforms.inverseProjection.value.copy(camera.projectionMatrixInverse);
-    uniforms.projectionScale.value = camera.projectionMatrix.elements[5];
-    // Solid-color backgrounds are cleared without tone mapping by the normal
-    // renderer; preserve that behavior. Environment / sky backgrounds are HDR.
-    uniforms.toneBackground.value = scene.background && scene.background.isColor ? 0 : 1;
-
-    const previousTarget = renderer.getRenderTarget(), autoClear = renderer.autoClear;
-    const scissorTest = renderer.getScissorTest();
-    renderer.getViewport(viewport); renderer.getScissor(scissor);
-    try {
-      renderer.autoClear = true;
-      renderer.setScissorTest(false);
-      renderer.setRenderTarget(target);
-      renderer.render(scene, camera);
-      renderer.setRenderTarget(previousTarget);
-      renderer.render(postScene, postCamera);
-    } finally {
-      renderer.setRenderTarget(previousTarget);
-      renderer.autoClear = autoClear;
-      renderer.setViewport(viewport);
-      renderer.setScissor(scissor);
-      renderer.setScissorTest(scissorTest);
-    }
-  }
-  function dispose() {
-    if (disposed) return;
-    disposed = true;
-    target.depthTexture.dispose(); target.dispose();
-    geometry.dispose(); material.dispose();
-  }
-  return { render, resize, dispose };
-}
-
 /* Interpretive architectural refinement, not an excavated plan of Antonia.
  * Josephus, War 5.5.8 describes a stone-clad rock, palatial rooms and courts,
  * four corner towers (the southeast higher), and passages to both cloisters.
@@ -2114,6 +1924,326 @@ function enrichTempleColonnades(T, ctx) {
   world.userData.colonnadeDetailV2=result;return result;
 }
 
+/* An imagined Mediterranean daylight setting. The hills are visual context,
+   not a topographic or archaeological survey. No animation or extra assets. */
+function createTempleDaylightSetting(T, {scene, mats}) {
+  const direction = new T.Vector3(.55,.8,.6).normalize();
+  const uniforms = {
+    sunDirection:{value:direction},
+    zenith:{value:new T.Color('#6d9fc9')},
+    horizon:{value:new T.Color('#d7e0e1')},
+    warmth:{value:0}
+  };
+  const material = new T.ShaderMaterial({
+    side:T.BackSide,depthWrite:false,fog:false,uniforms,
+    vertexShader:`varying vec3 skyDirection;void main(){skyDirection=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+    fragmentShader:`
+      varying vec3 skyDirection;
+      uniform vec3 sunDirection;uniform vec3 zenith;uniform vec3 horizon;uniform float warmth;
+      float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+      float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(hash(i),hash(i+vec2(1.0,0.0)),f.x),mix(hash(i+vec2(0.0,1.0)),hash(i+vec2(1.0)),f.x),f.y);}
+      float clouds(vec2 p){float n=.54*noise(p);p=p*2.03+vec2(4.2,7.8);n+=.28*noise(p);p=p*2.09+vec2(9.4,2.3);return n+.13*noise(p);}
+      void main(){
+        vec3 ray=normalize(skyDirection);float h=max(ray.y,0.0);
+        vec3 low=mix(horizon,vec3(.84,.66,.43),warmth*.25);
+        vec3 color=mix(low,zenith,smoothstep(0.0,.80,pow(h,.60)));
+        float glare=pow(max(dot(ray,sunDirection),0.0),12.0);
+        color+=vec3(.23,.19,.12)*glare;
+        vec2 projected=ray.xz/max(.17,h+.15);
+        float cloud=smoothstep(.58,.81,clouds(projected*1.25+vec2(2.4,-.6)));
+        cloud*=smoothstep(.025,.20,h)*(1.0-smoothstep(.65,.95,h));
+        color=mix(color,vec3(.86,.89,.90),cloud*.38);
+        float disk=smoothstep(.99987,.99997,dot(ray,sunDirection));
+        color+=vec3(3.0,2.6,1.9)*disk;
+        gl_FragColor=vec4(color,1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`
+  });
+  const sky=new T.Mesh(new T.SphereGeometry(2400,32,16),material);
+  sky.name='Mediterranean daylight, high thin cloud and atmospheric horizon';sky.renderOrder=-10;scene.add(sky);
+  scene.fog=new T.FogExp2('#d7e0e1',.00085);
+  const geometry=new T.PlaneGeometry(6000,6000,160,160);geometry.rotateX(-Math.PI/2);
+  const p=geometry.attributes.position;let low=Infinity,high=-Infinity;
+  for(let i=0;i<p.count;i++){
+    const x=p.getX(i),z=p.getZ(i),edge=Math.max(Math.abs(x)-240,Math.abs(z)-340);
+    const outside=T.MathUtils.smoothstep(edge,0,540);
+    const west=Math.exp(-((x+920)**2/720**2+(z+200)**2/1000**2));
+    const east=Math.exp(-((x-1050)**2/880**2+(z-280)**2/1200**2));
+    const folds=13*Math.sin(x*.0034+Math.sin(z*.0017))*Math.cos(z*.0026)+5*Math.sin(z*.009+x*.002);
+    const y=-25+outside*(48*west+40*east+folds);
+    p.setY(i,y);low=Math.min(low,y);high=Math.max(high,y);
+  }
+  geometry.computeVertexNormals();geometry.computeBoundingSphere();
+  // Distant terrain carries more aerial haze than the nearby architecture.
+  // Preserve the existing metre-scaled surface hook on this cloned material.
+  const groundMaterial=mats.terrain.clone();groundMaterial.color.set('#b4aa97');
+  const terrainCompile=mats.terrain.onBeforeCompile,terrainKey=mats.terrain.customProgramCacheKey;
+  groundMaterial.onBeforeCompile=function(shader){
+    terrainCompile.call(this,shader);
+    shader.fragmentShader=shader.fragmentShader.replace('#include <fog_fragment>',`#include <fog_fragment>
+      #ifdef USE_FOG
+        float distantHaze=1.0-exp(-pow(max(vFogDepth-260.0,0.0)*.0017,2.0));
+        gl_FragColor.rgb=mix(gl_FragColor.rgb,fogColor,distantHaze);
+      #endif`);
+  };
+  groundMaterial.customProgramCacheKey=()=>terrainKey.call(mats.terrain)+'-distant-aerial-haze-v1';
+  const ground=new T.Mesh(geometry,groundMaterial);ground.receiveShadow=true;
+  ground.name='Imagined limestone ridges beyond the precinct';scene.add(ground);
+  return {sky,ground,updateSun(vector,value){direction.copy(vector);uniforms.warmth.value=Math.abs(value-50)/50;},diagnostics:{hills:[low,high],interpretive:true}};
+}
+
+/* Photographed, physically scaled mineral detail for dressed sanctuary stone.
+   The CC0 source is Poly Haven's Marble 01 by Rob Tuytel. This is a material
+   reference, not a sampled archaeological surface or identification of a quarry.
+   The original image is shipped unchanged. A single slab interior is sampled
+   in the shader so the source photograph's tile joints never cross a carving. */
+function refineTempleMaterials(T, ctx) {
+  const { mats, renderer, root } = ctx;
+  const textures = [], pending = [];
+  const anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  const diagnostics = {
+    source: 'Poly Haven Marble 01 / Rob Tuytel / CC0',
+    textureResolution: 2048,
+    sampledSlabMetres: [.3955, .2490],
+    textureBytes: 1782090,
+    mineralCloudMetres: [2.27, 3.92],
+    rainTraceMaximumDarkening: .03,
+    goldWaveMaximumSlopeDegrees: .86,
+    surfaceTreatment: 'Interpretive honed stone and hand-worked gilding',
+    loaded: 0,
+    failed: [],
+    ready: false
+  };
+  let disposed = false;
+  const report = () => {
+    if (!disposed && root) root.dataset.materialRealism = JSON.stringify(diagnostics);
+  };
+  // Keep usable local placeholder images while the three files load. Texture
+  // objects are assigned synchronously, before architectural clones are made.
+  function load(name, fallback, color) {
+    const texture = new T.Texture(fallback.image);
+    texture.wrapS = texture.wrapT = T.ClampToEdgeWrapping;
+    texture.minFilter = T.LinearMipmapLinearFilter;
+    texture.magFilter = T.LinearFilter;
+    texture.anisotropy = anisotropy;
+    texture.colorSpace = color ? T.SRGBColorSpace : T.NoColorSpace;
+    texture.needsUpdate = true;
+    textures.push(texture);
+    pending.push(new Promise(resolve => {
+      new T.ImageLoader().load(new URL(`assets/textures/${name}`, document.baseURI).href,
+        image => {
+          if (!disposed) {
+            texture.image = image;
+            texture.needsUpdate = true;
+            diagnostics.loaded++;
+            report();
+          }
+          resolve(true);
+        }, undefined, () => {
+          diagnostics.failed.push(name);
+          report();
+          resolve(false);
+        });
+    }));
+    return texture;
+  }
+  const color = load('marble_01_diff_2k.jpg', mats.stone.map, true);
+  const height = load('marble_01_disp_2k.jpg', mats.stone.bumpMap, false);
+  const roughness = load('marble_01_rough_2k.jpg', mats.stone.roughnessMap, false);
+
+  // Continuous world-space variation supplies larger mineral structure than
+  // the photographed sub-metre detail. It is deliberately low contrast: the
+  // precinct is a maintained working building rather than an excavated ruin.
+  const finishNoise = `
+    float templeFinishHash( vec3 p ) {
+      p = fract( p * .1031 );
+      p += dot( p, p.yzx + 33.33 );
+      return fract( ( p.x + p.y ) * p.z );
+    }
+    float templeFinishNoise( vec3 p ) {
+      vec3 i = floor( p ), f = fract( p );
+      f = f * f * ( 3.0 - 2.0 * f );
+      float z0 = mix(
+        mix( templeFinishHash( i ), templeFinishHash( i + vec3( 1., 0., 0. ) ), f.x ),
+        mix( templeFinishHash( i + vec3( 0., 1., 0. ) ),
+             templeFinishHash( i + vec3( 1., 1., 0. ) ), f.x ), f.y );
+      float z1 = mix(
+        mix( templeFinishHash( i + vec3( 0., 0., 1. ) ),
+             templeFinishHash( i + vec3( 1., 0., 1. ) ), f.x ),
+        mix( templeFinishHash( i + vec3( 0., 1., 1. ) ),
+             templeFinishHash( i + vec3( 1., 1., 1. ) ), f.x ), f.y );
+      return mix( z0, z1, f.z );
+    }
+  `;
+
+  function photographedStone(material, colorHex, surfaceRoughness, environmentIntensity) {
+    material.map = color;
+    material.bumpMap = height;
+    material.roughnessMap = roughness;
+    material.color.setHex(colorHex);
+    material.roughness = surfaceRoughness;
+    material.bumpScale = .0024;
+    material.metalness = 0;
+    material.envMapIntensity = environmentIntensity;
+    material.userData.templeEnvironmentIntensity = environmentIntensity;
+    material.userData.worldTextureScale = [.3955, .2490];
+    material.userData.photographedSurface = 'polyhaven:marble_01';
+    material.onBeforeCompile = shader => {
+      const declarations = 'varying vec3 vTempleWorldPosition;\nvarying vec3 vTempleWorldNormal;\n';
+      shader.vertexShader = declarations + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace('#include <defaultnormal_vertex>', `#include <defaultnormal_vertex>
+        vTempleWorldNormal = inverseTransformDirection( transformedNormal, viewMatrix );`);
+      shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+        vec4 templeWorld = vec4( transformed, 1.0 );
+        #ifdef USE_INSTANCING
+          templeWorld = instanceMatrix * templeWorld;
+        #endif
+        vTempleWorldPosition = ( modelMatrix * templeWorld ).xyz;`);
+      shader.fragmentShader = declarations + finishNoise + `
+        vec2 templeStoneFinish( vec3 p ) {
+          float broad = templeFinishNoise( p * .255 + vec3( 11.7, 31.2, 7.4 ) );
+          float mineral = templeFinishNoise( p * .440 + vec3( -4.8, 17.1, 29.6 ) );
+          float cloud = broad * .70 + mineral * .30 - .50;
+          float vertical = pow( 1.0 - abs( normalize( vTempleWorldNormal ).y ), 2.0 );
+          float footprint = max( length( dFdx( p ) ), length( dFdy( p ) ) );
+          float fineVisibility = 1.0 - smoothstep( .018, .075, footprint );
+          // Sparse, narrow, gravity-aligned traces; they do not run over roofs.
+          float trace = templeFinishNoise( p * vec3( 13.7, .32, 13.7 )
+            + vec3( 43.3, 5.7, 19.1 ) );
+          float rain = smoothstep( .66, .84, trace )
+            * smoothstep( .10, .70, broad ) * vertical * fineVisibility;
+          return vec2( cloud, rain );
+        }
+        // Mirror a 0.3955 x 0.249 m interior of the original 1.5 m photograph.
+        // Reflection keeps value continuity without introducing artificial grout.
+        vec2 templeSlabUV( vec2 p ) {
+          vec2 mirrored = 1.0 - abs( mod( p, 2.0 ) - 1.0 );
+          return vec2( 0.361328125, 0.814453125 )
+            + mirrored * vec2( 0.263671875, 0.166015625 );
+        }
+        vec4 templeSample( sampler2D tex, vec3 p ) {
+          vec3 blend = pow( abs( normalize( vTempleWorldNormal ) ), vec3( 7.0 ) );
+          blend /= max( blend.x + blend.y + blend.z, 0.0001 );
+          vec2 axisScale = vec2( 2.528445, 4.016064 );
+          vec2 uvX = templeSlabUV( p.zy * axisScale );
+          vec2 uvY = templeSlabUV( p.xz * axisScale );
+          vec2 uvZ = templeSlabUV( p.xy * axisScale );
+          return texture2D( tex, uvX ) * blend.x
+            + texture2D( tex, uvY ) * blend.y
+            + texture2D( tex, uvZ ) * blend.z;
+        }
+      ` + shader.fragmentShader;
+      shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `
+        vec2 templeFinish = templeStoneFinish( vTempleWorldPosition );
+        float templeScannedHeight = .72;
+        #ifdef USE_BUMPMAP
+          templeScannedHeight = templeSample( bumpMap, vTempleWorldPosition ).r;
+        #endif
+        float templePores = 1.0 - smoothstep( .53, .67, templeScannedHeight );
+        #ifdef USE_MAP
+          vec4 sampledDiffuseColor = templeSample( map, vTempleWorldPosition );
+          // A restrained warm-white finish: retain photographed mineral detail
+          // while calibrating this cream reference to clean pale dressed stone.
+          // Values are linear albedo; they remain below a white paint reference.
+          sampledDiffuseColor.rgb = clamp( vec3( .510, .500, .470 ) *
+            ( vec3( 1.0 ) + ( sampledDiffuseColor.rgb /
+              vec3( .42954, .31538, .17553 ) - vec3( 1.0 ) ) * .52 ),
+            vec3( .035 ), vec3( .78 ) );
+          sampledDiffuseColor.rgb *= vec3( 1.0 )
+            + templeFinish.x * vec3( .052, .043, .027 );
+          sampledDiffuseColor.rgb *= vec3( 1.0 )
+            - templeFinish.y * vec3( .029, .030, .031 );
+          sampledDiffuseColor.rgb *= 1.0 - templePores * .007;
+          diffuseColor *= sampledDiffuseColor;
+        #endif
+      `);
+      shader.fragmentShader = shader.fragmentShader.replace('#include <roughnessmap_fragment>', `
+        float roughnessFactor = roughness;
+        #ifdef USE_ROUGHNESSMAP
+          roughnessFactor *= mix( .86, 1.12,
+            templeSample( roughnessMap, vTempleWorldPosition ).g );
+        #endif
+        roughnessFactor = clamp( roughnessFactor + templeFinish.x * .035
+          + templeFinish.y * .025 + templePores * .018, .32, .82 );
+      `);
+      shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_maps>', `
+        #ifdef USE_BUMPMAP
+          normal = perturbNormalArb( -vViewPosition, normal,
+            vec2( dFdx( templeScannedHeight ), dFdy( templeScannedHeight ) ) * bumpScale,
+            faceDirection );
+        #endif
+      `);
+    };
+    material.customProgramCacheKey = () => 'temple-photographed-dressed-stone-v3';
+    material.needsUpdate = true;
+  }
+
+  photographedStone(mats.stoneLight, 0xffffff, .44, .10);
+  photographedStone(mats.stone, 0xf1eee6, .52, .10);
+  photographedStone(mats.stoneDark, 0xd9d1bf, .64, .08);
+  // Real gold reflects a warm spectrum rather than a dark orange diffuse tint.
+  // The existing world-space hammered microtexture remains, at restrained depth.
+  mats.gold.color.setRGB(.95, .73, .31, T.LinearSRGBColorSpace);
+  mats.gold.roughness = .30;
+  mats.gold.bumpScale = .0004;
+  mats.gold.envMapIntensity = .75;
+  mats.gold.userData.templeEnvironmentIntensity = .75;
+  // Add hand-worked reflection variation to the existing world-space metal
+  // shader. These waves are below a millimetre, distinct from the larger plate
+  // curvature supplied by geometry. Their combined maximum tangent slope is
+  // below one degree; the surface remains visibly planar at building scale.
+  const originalGoldCompile = mats.gold.onBeforeCompile;
+  const originalGoldCacheKey = mats.gold.customProgramCacheKey;
+  mats.gold.onBeforeCompile = shader => {
+    originalGoldCompile.call(mats.gold, shader);
+    shader.fragmentShader = finishNoise + `
+      float templeGoldWave( vec3 p ) {
+        float footprint = max( length( dFdx( p ) ), length( dFdy( p ) ) );
+        float visible = 1.0 - smoothstep( .10, .30, footprint );
+        return visible * (
+          .00065 * sin( ( p.x + p.z ) * 11.423973 + .6 )
+          + .00045 * sin( p.y * 7.391983 + p.z * .7 + 1.7 )
+          + .00015 * sin( ( p.x - p.z ) * 16.981582 + p.y * .7 ) );
+      }
+    ` + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace(
+      'float templeHeight = templeSample( bumpMap, vTempleWorldPosition ).r;', `
+        float templeGrain = clamp(
+          templeSample( bumpMap, vTempleWorldPosition ).r - .5, -.05, .05 );
+        float templeHeight = templeGrain * bumpScale
+          + templeGoldWave( vTempleWorldPosition );`);
+    shader.fragmentShader = shader.fragmentShader.replace(
+      /vec2\(\s*dFdx\(\s*templeHeight\s*\),\s*dFdy\(\s*templeHeight\s*\)\s*\)\s*\*\s*bumpScale/g,
+      'vec2( dFdx( templeHeight ), dFdy( templeHeight ) )');
+    shader.fragmentShader = shader.fragmentShader.replace('#include <metalnessmap_fragment>', `
+      roughnessFactor = clamp( roughnessFactor + .014 * (
+        templeFinishNoise( vTempleWorldPosition * vec3( 2.3, 3.1, 2.7 )
+          + vec3( 8.1, 23.7, 4.9 ) ) - .5 ), .18, .48 );
+      #include <metalnessmap_fragment>
+    `);
+  };
+  mats.gold.customProgramCacheKey = () => `${originalGoldCacheKey.call(mats.gold)}-hand-worked-v2`;
+  mats.gold.needsUpdate = true;
+  report();
+
+  const ready = Promise.all(pending).then(() => {
+    diagnostics.ready = true;
+    report();
+    return diagnostics;
+  });
+  return {
+    textures,
+    diagnostics,
+    ready,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      textures.forEach(texture => texture.dispose());
+    }
+  };
+}
+
 /* Navigation keeps physical input streams separate: a pinch is applied once,
    and two touch points use a fixed baseline for simultaneous pan and zoom. */
 function templeWheelPixels(event, height, width=height) {
@@ -2171,6 +2301,8 @@ function createTempleNavigation(T,options) {
   const listen=(target,type,handler,settings)=>{target.addEventListener(type,handler,settings);listeners.push([target,type,handler,settings]);};
   const basis=()=>({right:new T.Vector3(1,0,0).applyQuaternion(camera.quaternion),up:new T.Vector3(0,1,0).applyQuaternion(camera.quaternion)});
   const touches=()=>[...points.entries()].filter(([,p])=>p.type==='touch').slice(0,2);
+  const directPointer=()=>[...points.values()].some(p=>p.type!=='mouse');
+  const samePair=pair=>baseline&&pair.length===2&&baseline.ids.every((id,i)=>id===pair[i][0]);
   function sample(pair){const a=pair[0][1],b=pair[1][1];return{x:(a.x+b.x)/2,y:(a.y+b.y)/2,distance:Math.max(.001,Math.hypot(a.x-b.x,a.y-b.y))};}
   function snapshot(x,y,distance,ids=null){const rect=canvas.getBoundingClientRect(),pose=options.getPose();return{...pose,target:pose.target.clone(),...basis(),x,y,distance,ids,centerX:rect.left+rect.width/2,centerY:rect.top+rect.height/2,height:rect.height,fov:camera.getEffectiveFOV()};}
   function change(action){const before=options.getPose(),result=action(),after=options.getPose();if(['radius','theta','phi'].some(k=>before[k]!==after[k])||['x','y','z'].some(k=>before.target[k]!==after.target[k]))changed=true;return result;}
@@ -2182,30 +2314,44 @@ function createTempleNavigation(T,options) {
   function zoom(factor,event){const rect=canvas.getBoundingClientRect(),x=Number.isFinite(event.clientX)?event.clientX:rect.left+rect.width/2,y=Number.isFinite(event.clientY)?event.clientY:rect.top+rect.height/2;const start=snapshot(x,y,1);applyProjected(start,{x,y,distance:1/factor});}
   function clear(commitChanges=false){if(commitChanges)commit();changed=false;const ids=[...points.keys()];points.clear();baseline=null;nativeBaseline=null;firstDown=null;dragged=false;wasMultiple=false;ownership.reset();clearTimeout(wheelTimer);wheelTimer=null;for(const id of ids)try{if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}catch(e){}}
   listen(canvas,'pointerdown',e=>{
-    if(e.pointerType==='mouse'&&e.button>2)return;e.preventDefault();change(options.onStart);
+    if(e.pointerType==='mouse'&&e.button>2)return;e.preventDefault();
+    const type=e.pointerType||'mouse',active=points.values().next().value;
+    if(points.has(e.pointerId)||(active&&(active.type!==type||type!=='touch')))return;
+    change(options.onStart);options.onInput?.(type==='mouse'?options.getMode():'touch');
     if(points.size===0){firstDown={x:e.clientX,y:e.clientY,time:now(),button:e.button,type:e.pointerType};dragged=false;wasMultiple=false;}
-    points.set(e.pointerId,{x:e.clientX,y:e.clientY,type:e.pointerType,button:e.button});try{canvas.setPointerCapture(e.pointerId);}catch(error){}
-    const pair=touches();if(pair.length===2){wasMultiple=true;dragged=true;nativeBaseline=null;ownership.pointerStart();rebase();}
+    if(!active&&type!=='mouse'){nativeBaseline=null;ownership.reset();}
+    points.set(e.pointerId,{x:e.clientX,y:e.clientY,type,button:e.button,anchorX:e.clientX,anchorY:e.clientY,orbitReady:false});try{canvas.setPointerCapture(e.pointerId);}catch(error){}
+    const pair=touches();if(pair.length===2){wasMultiple=true;dragged=true;nativeBaseline=null;ownership.pointerStart();if(!samePair(pair))rebase();}
   },{passive:false});
   listen(canvas,'pointermove',e=>{
     const previous=points.get(e.pointerId);if(!previous)return;e.preventDefault();
+    if(previous.type==='mouse'&&e.buttons===0){release(e,true);return;}
     const dx=e.clientX-previous.x,dy=e.clientY-previous.y;points.set(e.pointerId,{...previous,x:e.clientX,y:e.clientY});
-    if(firstDown&&Math.hypot(e.clientX-firstDown.x,e.clientY-firstDown.y)>4)dragged=true;
+    if(dx===0&&dy===0)return;
     const pair=touches();
     if(pair.length===2){
-      if(!baseline||baseline.ids.some((id,i)=>id!==pair[i][0]))rebase();
+      if(!samePair(pair))rebase();
       if(baseline&&baseline.ids.includes(e.pointerId))applyProjected(baseline,sample(pair));
       dragged=true;wasMultiple=true;return;
     }
-    if(previous.type==='mouse'&&(e.buttons&6||e.shiftKey))pan(dx,dy);
-    else change(()=>options.orbit(dx,dy));
+    if(previous.type==='mouse'){
+      if(firstDown&&Math.hypot(e.clientX-firstDown.x,e.clientY-firstDown.y)>4)dragged=true;
+      if(e.buttons&6||e.shiftKey)pan(dx,dy);else change(()=>options.orbit(dx,dy));
+    }else{
+      let orbitX=dx,orbitY=dy;
+      if(!previous.orbitReady){orbitX=e.clientX-previous.anchorX;orbitY=e.clientY-previous.anchorY;if(Math.hypot(orbitX,orbitY)<=4)return;points.get(e.pointerId).orbitReady=true;}
+      dragged=true;change(()=>options.orbit(orbitX,orbitY));
+    }
   },{passive:false});
   function release(e,cancelled){
     if(!points.has(e.pointerId))return;
-    const single=points.size===1,pairBefore=touches().length===2;points.delete(e.pointerId);
+    const single=points.size===1,pairBefore=touches();points.delete(e.pointerId);const pairAfter=touches();
     if(!cancelled&&single&&!dragged&&!wasMultiple&&firstDown&&(firstDown.type!=='mouse'||firstDown.button===0)&&now()-firstDown.time<600)options.onPick(e);
-    if(pairBefore){ownership.pointerEnd(now());baseline=null;dragged=true;wasMultiple=true;}
-    if(touches().length===2){ownership.pointerStart();rebase();}
+    const pairChanged=pairBefore.length===2&&(pairAfter.length!==2||pairBefore.some(([id],i)=>id!==pairAfter[i][0]));
+    if(pairChanged){ownership.pointerEnd(now());baseline=null;dragged=true;wasMultiple=true;
+      if(pairAfter.length===2){ownership.pointerStart();rebase();}
+      else if(points.size===1){const remaining=points.values().next().value;remaining.anchorX=remaining.x;remaining.anchorY=remaining.y;remaining.orbitReady=false;}
+    }
     if(points.size===0){firstDown=null;baseline=null;commit();}else dragged=true;
   }
   listen(canvas,'pointerup',e=>release(e,false));
@@ -2213,16 +2359,261 @@ function createTempleNavigation(T,options) {
   listen(canvas,'lostpointercapture',e=>release(e,true));
   listen(canvas,'contextmenu',e=>e.preventDefault());listen(canvas,'auxclick',e=>e.preventDefault());
   listen(canvas,'wheel',e=>{
-    e.preventDefault();const delta=templeWheelPixels(e,stage.clientHeight,stage.clientWidth);change(options.onStart);
-    if(e.ctrlKey){if(!ownership.wheel(now()))return;nativeBaseline=null;zoom(Math.exp(Math.max(-100,Math.min(100,delta.y))*.01),e);}
-    else{if(ownership.blocksPan(now()))return;if(options.getMode()==='mouse')zoom(Math.exp(Math.max(-200,Math.min(200,delta.y))*.0018),e);else pan(-delta.x,-delta.y);}
+    e.preventDefault();if(directPointer())return;const delta=templeWheelPixels(e,stage.clientHeight,stage.clientWidth);if(delta.x===0&&delta.y===0)return;
+    if(e.ctrlKey){if(delta.y===0||!ownership.wheel(now()))return;change(options.onStart);options.onInput?.('trackpad');nativeBaseline=null;zoom(Math.exp(Math.max(-100,Math.min(100,delta.y))*.01),e);}
+    else{if(ownership.blocksPan(now()))return;change(options.onStart);options.onInput?.(options.getMode());if(options.getMode()==='mouse')zoom(Math.exp(Math.max(-200,Math.min(200,delta.y))*.0018),e);else pan(-delta.x,-delta.y);}
     commitSoon();
   },{passive:false});
-  listen(canvas,'gesturestart',e=>{e.preventDefault();if(!ownership.nativeStart(now()))return;change(options.onStart);const rect=canvas.getBoundingClientRect();nativeBaseline=snapshot(Number.isFinite(e.clientX)?e.clientX:rect.left+rect.width/2,Number.isFinite(e.clientY)?e.clientY:rect.top+rect.height/2,1);},{passive:false});
-  listen(canvas,'gesturechange',e=>{e.preventDefault();if(!nativeBaseline||touches().length===2)return;const scale=Math.max(.001,Number.isFinite(e.scale)?e.scale:1);applyProjected(nativeBaseline,{x:nativeBaseline.x,y:nativeBaseline.y,distance:scale});},{passive:false});
+  listen(canvas,'gesturestart',e=>{e.preventDefault();if(directPointer()||!ownership.nativeStart(now()))return;change(options.onStart);options.onInput?.('trackpad');const rect=canvas.getBoundingClientRect();nativeBaseline=snapshot(Number.isFinite(e.clientX)?e.clientX:rect.left+rect.width/2,Number.isFinite(e.clientY)?e.clientY:rect.top+rect.height/2,1);},{passive:false});
+  listen(canvas,'gesturechange',e=>{e.preventDefault();if(!nativeBaseline||directPointer())return;const scale=Math.max(.001,Number.isFinite(e.scale)?e.scale:1);applyProjected(nativeBaseline,{x:nativeBaseline.x,y:nativeBaseline.y,distance:scale});},{passive:false});
   listen(canvas,'gestureend',e=>{e.preventDefault();if(nativeBaseline){nativeBaseline=null;ownership.nativeEnd(now());commit();}},{passive:false});
   listen(window,'blur',()=>clear(true));listen(document,'visibilitychange',()=>{if(document.hidden)clear(true);});
   return {cancel:clear,dispose(){clear();for(const[target,type,handler,settings]of listeners)target.removeEventListener(type,handler,settings);}};
+}
+
+/* Linear-light contact shading followed by a perceptual FXAA display resolve.
+   Older GPUs retain the native renderer; no added rendering dependency. */
+function createTempleContactRenderer(T, renderer, scene, camera) {
+  // Narrow screens use native multisample antialiasing and one render pass.
+  // This preserves fine masonry without allocating several phone-sized buffers.
+  const supported = !matchMedia('(max-width: 600px)').matches && !new URLSearchParams(location.search).has('direct') && renderer.capabilities.isWebGL2 && renderer.extensions.has('EXT_color_buffer_float');
+  const drawingSize = new T.Vector2();
+  let disposed = false;
+  if (!supported) return {
+    async prepare() { if (!disposed && renderer.compileAsync) await renderer.compileAsync(scene,camera); },
+    render() { if (!disposed) renderer.render(scene, camera); },
+    resize() {},
+    dispose() { disposed = true; }
+  };
+
+  // Float color MSAA is optional even when ordinary color supports it.
+  // Depth and color must agree on their sample count for a complete framebuffer.
+  const gl=renderer.getContext();
+  const colorSamples=Array.from(gl.getInternalformatParameter(gl.RENDERBUFFER,gl.RGBA16F,gl.SAMPLES)||[]);
+  const depthSamples=Array.from(gl.getInternalformatParameter(gl.RENDERBUFFER,gl.DEPTH_COMPONENT24,gl.SAMPLES)||[]);
+  const samples=matchMedia("(max-width: 600px)").matches?0:Math.max(0,...colorSamples.filter(n=>n<=4&&depthSamples.includes(n)));
+  renderer.getDrawingBufferSize(drawingSize);
+  const target = new T.WebGLRenderTarget(Math.max(1, drawingSize.x), Math.max(1, drawingSize.y), {
+    type: T.HalfFloatType,
+    format: T.RGBAFormat,
+    minFilter: T.LinearFilter,
+    magFilter: T.LinearFilter,
+    depthBuffer: true,
+    stencilBuffer: false,
+    samples
+  });
+  target.texture.name = 'Temple linear HDR scene';
+  target.texture.colorSpace = T.LinearSRGBColorSpace;
+  target.texture.generateMipmaps = false;
+  target.depthTexture = new T.DepthTexture(target.width, target.height, T.UnsignedIntType);
+  target.depthTexture.name = 'Temple contact depth';
+  target.depthTexture.format = T.DepthFormat;
+  target.depthTexture.minFilter = target.depthTexture.magFilter = T.NearestFilter;
+
+  const displayTarget = new T.WebGLRenderTarget(target.width,target.height,{type:T.UnsignedByteType,format:T.RGBAFormat,minFilter:T.LinearFilter,magFilter:T.LinearFilter,depthBuffer:false,stencilBuffer:false});
+  displayTarget.texture.name = 'Temple perceptual display resolve';
+  displayTarget.texture.colorSpace = T.NoColorSpace;
+  displayTarget.texture.generateMipmaps = false;
+  const uniforms = {
+    tColor: { value: target.texture },
+    tDepth: { value: target.depthTexture },
+    resolution: { value: new T.Vector2(target.width, target.height) },
+    inverseProjection: { value: camera.projectionMatrixInverse.clone() },
+    projectionScale: { value: camera.projectionMatrix.elements[5] },
+    toneBackground: { value: 1 },
+    toneMappingExposure: { value: renderer.toneMappingExposure }
+  };
+  const material = new T.ShaderMaterial({
+    uniforms,
+    depthTest: false,
+    depthWrite: false,
+    blending: T.NoBlending,
+    toneMapped: false,
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = vec4( position.xy, 0.0, 1.0 );
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D tColor;
+      uniform sampler2D tDepth;
+      uniform vec2 resolution;
+      uniform mat4 inverseProjection;
+      uniform float projectionScale;
+      uniform float toneBackground;
+      varying vec2 vUv;
+      #include <common>
+      #include <tonemapping_pars_fragment>
+
+      vec3 viewPosition( vec2 uv, float depth ) {
+        vec4 p = inverseProjection * vec4( uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0 );
+        return p.xyz / p.w;
+      }
+
+      float contactShading( float depth ) {
+        if (depth >= .9999999) return 1.0;
+        vec3 p = viewPosition(vUv,depth);
+        // Use the nearer depth neighbor on each axis. Screen derivatives across
+        // thin joints otherwise tilt the normal and pepper broad stone faces.
+        vec2 texel = 1.0 / resolution;
+        vec3 l = viewPosition(vUv-vec2(texel.x,0.0),texture2D(tDepth,vUv-vec2(texel.x,0.0)).r);
+        vec3 r = viewPosition(vUv+vec2(texel.x,0.0),texture2D(tDepth,vUv+vec2(texel.x,0.0)).r);
+        vec3 d = viewPosition(vUv-vec2(0.0,texel.y),texture2D(tDepth,vUv-vec2(0.0,texel.y)).r);
+        vec3 u = viewPosition(vUv+vec2(0.0,texel.y),texture2D(tDepth,vUv+vec2(0.0,texel.y)).r);
+        vec3 dx = abs(p.z-l.z)<abs(r.z-p.z)?p-l:r-p;
+        vec3 dy = abs(p.z-d.z)<abs(u.z-p.z)?p-d:u-p;
+        vec3 crossed = cross(dx,dy);
+        vec3 n = crossed * inversesqrt(max(dot(crossed,crossed),1e-12));
+        if (dot(n,-p) < 0.0) n = -n;
+
+        // The radius remains 1.15 physical metres. At an overview distance the
+        // effect naturally fades to subpixels rather than making dark outlines.
+        float radius = 1.15;
+        float pixelRadius = min(18.0, radius * projectionScale * resolution.y * .5 / max(.1,-p.z));
+        if (pixelRadius < 1.0) return 1.0;
+        float visible = smoothstep(1.0,2.5,pixelRadius) * (1.0-smoothstep(30.0,55.0,-p.z));
+        float occlusion = 0.0;
+        for (int i=0; i<12; i++) {
+          float fi = float(i);
+          float angle = fi * 2.39996323 + .42;
+          float spiral = sqrt((fi + .55) / 12.0);
+          vec2 sampleUv = vUv + vec2(cos(angle),sin(angle)) * pixelRadius * spiral / resolution;
+          if (sampleUv.x <= 0.0 || sampleUv.x >= 1.0 || sampleUv.y <= 0.0 || sampleUv.y >= 1.0) continue;
+          float sd = texture2D(tDepth,sampleUv).r;
+          if (sd >= .9999999) continue;
+          vec3 delta = viewPosition(sampleUv,sd) - p;
+          float distanceToSurface = length(delta);
+          float range = 1.0 - smoothstep(radius*.25,radius,distanceToSurface);
+          float horizon = max(0.0,dot(n,delta / max(distanceToSurface,.0001)) - .25);
+          float selfBias = smoothstep(.06,.16,distanceToSurface);
+          occlusion += horizon * range * selfBias;
+        }
+        // Restrict the correction to nearby cavities. Subpixel stone joints at
+        // architectural viewing distances must not become dotted dark edges.
+        return 1.0 - min(.14,occlusion * .18) * visible;
+      }
+
+      void main() {
+        vec4 original = texture2D(tColor,vUv);
+        float depth = texture2D(tDepth,vUv).r;
+        vec3 color = original.rgb * contactShading(depth);
+        // Correct contact in linear light, then resolve display-referred edges
+        // in a separate pass. Each pixel is tone mapped and encoded once.
+        if (depth < .9999999 || toneBackground > .5) color=ACESFilmicToneMapping(color);
+        color=max(color,vec3(0.0));
+        vec3 encoded=mix(color*12.92,1.055*pow(color,vec3(1.0/2.4))-.055,step(vec3(.0031308),color));
+        gl_FragColor=vec4(encoded,original.a);
+      }
+    `
+  });
+  const geometry = new T.PlaneGeometry(2, 2);
+  const quad = new T.Mesh(geometry, material);
+  quad.frustumCulled = false;
+  const postScene = new T.Scene();
+  postScene.add(quad);
+  const postCamera = new T.Camera();
+  const resolveMaterial = new T.ShaderMaterial({
+    uniforms:{tColor:{value:displayTarget.texture},resolution:uniforms.resolution},
+    depthTest:false,depthWrite:false,blending:T.NoBlending,toneMapped:false,
+    vertexShader:material.vertexShader,
+    fragmentShader:`
+      uniform sampler2D tColor;uniform vec2 resolution;varying vec2 vUv;
+      float luma( vec3 c ) { return dot( c, vec3( 0.299, 0.587, 0.114 ) ); }
+
+      // A small FXAA resolve restores smooth silhouettes because the scene is
+      // rendered to a non-multisampled, readable depth attachment.
+      vec3 sceneColor( vec2 uv ) {
+        vec2 texel = 1.0 / resolution;
+        vec3 c = texture2D( tColor, uv ).rgb;
+        vec3 nw = texture2D( tColor, uv + vec2(-1.0, 1.0) * texel ).rgb;
+        vec3 ne = texture2D( tColor, uv + vec2( 1.0, 1.0) * texel ).rgb;
+        vec3 sw = texture2D( tColor, uv + vec2(-1.0,-1.0) * texel ).rgb;
+        vec3 se = texture2D( tColor, uv + vec2( 1.0,-1.0) * texel ).rgb;
+        float lc = luma(c), lnw = luma(nw), lne = luma(ne), lsw = luma(sw), lse = luma(se);
+        float lo = min(lc, min(min(lnw,lne), min(lsw,lse)));
+        float hi = max(lc, max(max(lnw,lne), max(lsw,lse)));
+        if (hi - lo < max(.035, hi * .12)) return c;
+        vec2 direction = vec2(-((lnw+lne)-(lsw+lse)), (lnw+lsw)-(lne+lse));
+        float reduce = max((lnw+lne+lsw+lse) * .0078125, .0078125);
+        direction = clamp(direction / (min(abs(direction.x),abs(direction.y)) + reduce), vec2(-4.0), vec2(4.0)) * texel;
+        vec3 a = .5 * (texture2D(tColor,uv-direction/6.0).rgb + texture2D(tColor,uv+direction/6.0).rgb);
+        vec3 b = a * .5 + .25 * (texture2D(tColor,uv-direction*.5).rgb + texture2D(tColor,uv+direction*.5).rgb);
+        float lb = luma(b);
+        return lb < lo || lb > hi ? a : b;
+      }
+
+      void main(){gl_FragColor=vec4(sceneColor(vUv),texture2D(tColor,vUv).a);}
+    `
+  });
+  const resolveQuad=new T.Mesh(geometry,resolveMaterial);resolveQuad.frustumCulled=false;
+  const resolveScene=new T.Scene();resolveScene.add(resolveQuad);
+
+  const viewport = new T.Vector4(), scissor = new T.Vector4();
+
+  function resize(w, h) {
+    if (disposed) return;
+    const pixelRatio = renderer.getPixelRatio();
+    const width = Math.max(1, Math.round(w * pixelRatio)), height = Math.max(1, Math.round(h * pixelRatio));
+    if (target.width !== width || target.height !== height) {target.setSize(width,height);displayTarget.setSize(width,height);}
+    uniforms.resolution.value.set(width, height);
+  }
+  function render() {
+    if (disposed) return;
+    // Let any future immersive renderer use its own XR framebuffer and cameras.
+    if (renderer.xr && renderer.xr.isPresenting) { renderer.render(scene, camera); return; }
+    renderer.getDrawingBufferSize(drawingSize);
+    if (target.width !== drawingSize.x || target.height !== drawingSize.y) {
+      target.setSize(Math.max(1,drawingSize.x),Math.max(1,drawingSize.y));
+      displayTarget.setSize(target.width,target.height);
+      uniforms.resolution.value.copy(drawingSize);
+    }
+    uniforms.toneMappingExposure.value=renderer.toneMappingExposure;
+    uniforms.inverseProjection.value.copy(camera.projectionMatrixInverse);
+    uniforms.projectionScale.value = camera.projectionMatrix.elements[5];
+    // Solid-color backgrounds are cleared without tone mapping by the normal
+    // renderer; preserve that behavior. Environment / sky backgrounds are HDR.
+    uniforms.toneBackground.value = scene.background && scene.background.isColor ? 0 : 1;
+
+    const previousTarget = renderer.getRenderTarget(), autoClear = renderer.autoClear;
+    const scissorTest = renderer.getScissorTest();
+    renderer.getViewport(viewport); renderer.getScissor(scissor);
+    try {
+      renderer.autoClear = true;
+      renderer.setScissorTest(false);
+      renderer.setRenderTarget(target);
+      renderer.render(scene, camera);
+      renderer.setRenderTarget(displayTarget);
+      renderer.render(postScene, postCamera);
+      renderer.setRenderTarget(previousTarget);
+      renderer.render(resolveScene,postCamera);
+    } finally {
+      renderer.setRenderTarget(previousTarget);
+      renderer.autoClear = autoClear;
+      renderer.setViewport(viewport);
+      renderer.setScissor(scissor);
+      renderer.setScissorTest(scissorTest);
+    }
+  }
+  async function prepare() {
+    if(disposed || !renderer.compileAsync)return;
+    const previousTarget=renderer.getRenderTarget();
+    try {
+      renderer.setRenderTarget(target);await renderer.compileAsync(scene,camera);
+      if(disposed)return;
+      renderer.setRenderTarget(displayTarget);await renderer.compileAsync(postScene,postCamera);
+      if(disposed)return;
+      renderer.setRenderTarget(null);await renderer.compileAsync(resolveScene,postCamera);
+    } finally {renderer.setRenderTarget(previousTarget);}
+  }
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    target.depthTexture.dispose(); target.dispose(); displayTarget.dispose();
+    geometry.dispose(); material.dispose(); resolveMaterial.dispose();
+  }
+  return { prepare, render, resize, dispose };
 }
 
 /* Sanctuary detail pass: interpretive carved classical profiles, rather than
@@ -2548,6 +2939,527 @@ function enrichSanctuaryDetail(T, ctx) {
   return stats;
 }
 
+/* A construction and finish pass for the sanctuary itself. Josephus, War
+ * 5.5.4–6, describes white stone, gilding around the inner entrance and a
+ * golden vine above it. Profiles, jointing and the distribution of gold are
+ * interpretive; the sacred chamber plan and its furnishings are unchanged.
+ * Call after enrichSanctuaryDetail(). East is +X; all dimensions are metres.
+ */
+function refineSanctuaryRealism(T, ctx) {
+  const { world, mats } = ctx;
+  let sanctuary;
+  world.traverse(o => { if (o.isGroup && o.userData.landmark === 'sanctuary') sanctuary = o; });
+  if (!sanctuary) return { error: 'Sanctuary group not found' };
+  if (sanctuary.userData.architecturalRealismV3) return sanctuary.userData.architecturalRealismV3;
+  const north = sanctuary.getObjectByName('North walls and chambers — removable for cutaway') || sanctuary;
+  const roofs = sanctuary.getObjectByName('Roof and upper chambers — removable for cutaway') || sanctuary;
+  const batches = new Map(), cachedBoxes = new Map();
+  let removedTriangles = 0, dressedBlocks = 0, windows = 0;
+  const counts = { cornices: 0, cofferPanels: 0, doorLeaves: 0, grapeClusters: 0, formedGoldPlates:0, botanicalFriezeModules:0, wornStepStones:0, smallNoseChips:0 };
+
+  function geometry(positions, indices, uvs) {
+    const g = new T.BufferGeometry();
+    g.setAttribute('position', new T.Float32BufferAttribute(positions, 3));
+    if (uvs) g.setAttribute('uv', new T.Float32BufferAttribute(uvs, 2));
+    if (indices) {
+      // Sub-centimetre wear can collapse an otherwise valid cap triangle
+      // after Float32 quantization. Exclude those before computing normals.
+      const a=new T.Vector3(),b=new T.Vector3(),c=new T.Vector3(),valid=[],p=g.attributes.position;
+      for(let i=0;i<indices.length;i+=3){a.fromBufferAttribute(p,indices[i]);b.fromBufferAttribute(p,indices[i+1]);c.fromBufferAttribute(p,indices[i+2]);if(b.sub(a).cross(c.sub(a)).lengthSq()>1e-18)valid.push(indices[i],indices[i+1],indices[i+2]);}
+      g.setIndex(valid);
+    }
+    g.computeVertexNormals(); return g;
+  }
+  function append(parent, source, material, position = [0,0,0], rotation = [0,0,0], castShadow = true, tint = [1,1,1]) {
+    let byMaterial = batches.get(parent);
+    if (!byMaterial) { byMaterial = new Map(); batches.set(parent, byMaterial); }
+    const key = `${material.uuid}:${castShadow}`;
+    if (!byMaterial.has(key)) byMaterial.set(key, { material, castShadow, position: [], normal: [], uv: [], color: [] });
+    const batch = byMaterial.get(key), transform = new T.Object3D();
+    transform.position.set(...position); transform.rotation.set(...rotation); transform.updateMatrix();
+    const g = source.index ? source.toNonIndexed() : source.clone();
+    g.applyMatrix4(transform.matrix);
+    if (!g.attributes.normal) g.computeVertexNormals();
+    const p = g.attributes.position, n = g.attributes.normal, uv = g.attributes.uv;
+    for (let i=0;i<p.count;i++) {
+      batch.position.push(p.getX(i),p.getY(i),p.getZ(i));
+      batch.normal.push(n.getX(i),n.getY(i),n.getZ(i));
+      batch.uv.push(uv ? uv.getX(i) : 0,uv ? uv.getY(i) : 0);
+      if(material.vertexColors)batch.color.push(...tint);
+    }
+    g.dispose();
+  }
+  // Bevels stay in physical units, independent of each block's aspect ratio.
+  // Broad flats have flat normals; the tiny dressed arris carries the light.
+  function softBox(w,h,d,bevel=.012) {
+    const b=Math.max(.0005,Math.min(bevel,w*.12,h*.12,d*.2)),key=[w,h,d,b].join(',');
+    if (cachedBoxes.has(key)) return cachedBoxes.get(key);
+    const s=new T.Shape();
+    s.moveTo(-w/2+b,-h/2+b);s.lineTo(w/2-b,-h/2+b);s.lineTo(w/2-b,h/2-b);s.lineTo(-w/2+b,h/2-b);s.closePath();
+    const g=new T.ExtrudeGeometry(s,{depth:d-2*b,bevelEnabled:true,bevelSize:b,bevelThickness:b,bevelSegments:3,steps:1,curveSegments:1});
+    g.translate(0,0,-d/2+b);g.clearGroups();cachedBoxes.set(key,g);return g;
+  }
+  const block=(p,x,y,z,w,h,d,m=mats.stoneLight,b=.012,shadow=true,tint=[1,1,1])=>append(p,softBox(w,h,d,b),m,[x,y,z],[0,0,0],shadow,tint);
+  function loose(p,g,m,position,rotation,shadow=true) { append(p,g,m,position,rotation,shadow);g.dispose(); }
+  function tube(p,points,radius,m,segments=24,sides=10) {
+    const curve=new T.CatmullRomCurve3(points.map(a=>new T.Vector3(...a)));
+    loose(p,new T.TubeGeometry(curve,segments,radius,sides,false),m);
+  }
+  const smooth=t=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);};
+  const stable=(a,b=0)=>.5+.5*Math.sin(a*12.9898+b*78.233);
+
+  // Formed sheets have a quiet common finish. Fine folded seams, not color
+  // patches, divide them; broad 3–8 mm bows change reflected light gently.
+  // A supporting gold face remains beneath every joint. The thin finish is
+  // excluded from the coarse complex-wide shadow map to prevent seam acne.
+  function goldField(parent,axis,plane,u0,u1,v0,v1,normal,nominalWidth=1.95,nominalHeight=2.30) {
+    const rows=Math.max(1,Math.round((v1-v0)/nominalHeight)),height=(v1-v0)/rows;
+    for(let row=0;row<rows;row++) {
+      const count=Math.max(1,Math.round((u1-u0)/nominalWidth)),width=(u1-u0)/count,offset=width*(.18+.45*stable(row+1,v0));
+      const cuts=[u0];let cutIndex=0;for(let u=u0+width-offset;u<u1-.30;u+=width){const cut=u+(stable(cutIndex++,row)-.5)*width*.16;if(cut>cuts[cuts.length-1]+.30&&cut<u1-.30)cuts.push(cut);}cuts.push(u1);
+      for(let col=0;col<cuts.length-1;col++) {
+        const left=cuts[col]+.0008,right=cuts[col+1]-.0008,bottom=v0+row*height+.0008,top=v0+(row+1)*height-.0008,w=right-left,h=top-bottom;
+        const us=[0,.004/w,.014/w,.32,.67,1-.014/w,1-.004/w,1],vs=[0,.004/h,.014/h,.32,.67,1-.014/h,1-.004/h,1];
+        const p=[],idx=[],uv=[],bow=.003+.005*stable(left,top),tiltU=(stable(top,left)-.5)*.0015,tiltV=(stable(left+3,top+7)-.5)*.0015;
+        const point=(u,v,projection)=>axis==='x'?[plane+normal*projection,bottom+v*h,left+u*w]:[left+u*w,bottom+v*h,plane+normal*projection];
+        for(const v of vs)for(const u of us) {
+          const edge=Math.min(u*w,(1-u)*w,v*h,(1-v)*h),envelope=Math.sin(Math.PI*u)*Math.sin(Math.PI*v);
+          const fold=.0024+.00025*smooth(edge/.003),ripple=.00045*Math.sin(u*5.1+left)*Math.sin(v*4.3+top);
+          const depth=fold+envelope*(bow+tiltU*(u-.5)+tiltV*(v-.5)+ripple);
+          p.push(...point(u,v,depth));uv.push(u,v);
+        }
+        const nx=us.length,ny=vs.length;
+        for(let y=0;y<ny-1;y++)for(let x=0;x<nx-1;x++){const a=y*nx+x,b=a+1,c=a+nx,d=c+1;idx.push(a,c,b,b,c,d);}
+        const edge=[];for(let x=0;x<nx;x++)edge.push(x);for(let y=1;y<ny;y++)edge.push(y*nx+nx-1);for(let x=nx-2;x>=0;x--)edge.push((ny-1)*nx+x);for(let y=ny-2;y>0;y--)edge.push(y*nx);
+        const backStart=p.length/3;
+        for(const i of edge){const u=us[i%nx],v=vs[Math.floor(i/nx)];p.push(...point(u,v,.001));uv.push(u,v);}
+        const center=p.length/3;p.push(...point(.5,.5,.001));uv.push(.5,.5);
+        for(let k=0;k<edge.length;k++) {const next=(k+1)%edge.length,a=edge[k],b=edge[next],c=backStart+k,d=backStart+next;idx.push(a,b,d,a,d,c,center,c,d);}
+        if(axis==='x'?normal<0:normal>0)for(let i=0;i<idx.length;i+=3)[idx[i+1],idx[i+2]]=[idx[i+2],idx[i+1]];
+        loose(parent,geometry(p,idx,uv),mats.gold,undefined,undefined,false);counts.formedGoldPlates++;
+      }
+    }
+  }
+
+  // Smooth, solid botanical relief. A turned tip and cupped blade catch
+  // grazing light, while a shallow shell keeps the ornament attached to its
+  // plated field. Its restrained vocabulary is a creative reconstruction.
+  function friezeLeaf(parent,x,y,z,angle,length=.68,halfWidth=.075) {
+    const p=[],idx=[],uv=[],rows=12,cols=6;
+    for(let row=0;row<=rows;row++) {
+      const t=row/rows,turn=smooth((t-.76)/.24),width=.002+halfWidth*Math.pow(Math.sin(Math.PI*t),.65);
+      const cy=y+Math.cos(angle)*length*t-.045*turn*turn,cz=z+Math.sin(angle)*length*t+Math.sign(angle)*.03*turn;
+      for(let k=0;k<=cols;k++){const u=k/cols*2-1,rib=.014*(1-Math.abs(u))*Math.sin(Math.PI*t);p.push(x+.016+.046*Math.sin(Math.PI*t)+.025*turn-.018*u*u+rib,cy-u*width*Math.sin(angle),cz+u*width*Math.cos(angle));uv.push(k/cols,t);}
+    }
+    for(let row=0;row<rows;row++)for(let k=0;k<cols;k++){const a=row*(cols+1)+k,b=a+1,c=a+cols+1,d=c+1;idx.push(a,c,b,b,c,d);}
+    const front=p.length/3,frontIndices=idx.slice();
+    for(let i=0;i<front;i++){p.push(p[i*3]-.012,p[i*3+1],p[i*3+2]);uv.push(uv[i*2],uv[i*2+1]);}
+    for(let i=0;i<frontIndices.length;i+=3)idx.push(frontIndices[i]+front,frontIndices[i+2]+front,frontIndices[i+1]+front);
+    const edge=[];for(let k=0;k<=cols;k++)edge.push(k);for(let j=1;j<=rows;j++)edge.push(j*(cols+1)+cols);for(let k=cols-1;k>=0;k--)edge.push(rows*(cols+1)+k);for(let j=rows-1;j>0;j--)edge.push(j*(cols+1));
+    for(let k=0;k<edge.length;k++){const a=edge[k],b=edge[(k+1)%edge.length];idx.push(a,b,b+front,a,b+front,a+front);}
+    loose(parent,geometry(p,idx,uv),mats.gold);
+  }
+
+  // Remove only complete triangles from identified detail batches. Tall
+  // structural wall triangles cannot fit these bounded detail regions.
+  function stripDetails(names, regions) {
+    sanctuary.traverse(o=>{
+      if (!o.isMesh || o.isInstancedMesh || !names.includes(o.name)) return;
+      const old=o.geometry,g=old.index?old.toNonIndexed():old;
+      const keys=['position','normal','uv'].filter(k=>g.attributes[k]);
+      const arrays=Object.fromEntries(keys.map(k=>[k,[]]));
+      o.updateMatrix();const v=new T.Vector3();let omitted=0;
+      for(let i=0;i<g.attributes.position.count;i+=3) {
+        const vertices=[0,1,2].map(k=>{v.fromBufferAttribute(g.attributes.position,i+k).applyMatrix4(o.matrix);return [v.x,v.y,v.z];});
+        if(regions.some(r=>vertices.every(p=>p[0]>=r[0]&&p[0]<=r[1]&&p[1]>=r[2]&&p[1]<=r[3]&&p[2]>=r[4]&&p[2]<=r[5]))) {omitted++;continue;}
+        for(const key of keys) {const a=g.attributes[key];for(let k=0;k<3;k++)for(let j=0;j<a.itemSize;j++)arrays[key].push(a.array[(i+k)*a.itemSize+j]);}
+      }
+      if(omitted) {
+        const replacement=new T.BufferGeometry();
+        for(const key of keys)replacement.setAttribute(key,new T.Float32BufferAttribute(arrays[key],g.attributes[key].itemSize));
+        replacement.computeBoundingBox();replacement.computeBoundingSphere();o.geometry=replacement;old.dispose();removedTriangles+=omitted;
+      }
+      if(g!==old)g.dispose();
+    });
+  }
+
+  // Fine-jointed, dressed white ashlar. The 14 mm projection and 6 mm arris
+  // avoid the earlier dark, rustic boss grid. Existing 15 mm bonds survive.
+  const oldAshlar=[];
+  sanctuary.traverse(o=>{if(o.isInstancedMesh&&o.name==='Limestone ashlar courses')oldAshlar.push(o);});
+  const matrix=new T.Matrix4(),position=new T.Vector3(),rotation=new T.Quaternion(),scale=new T.Vector3();
+  const quarryMaterials=new Map();
+  for(const o of oldAshlar) {
+    if(!quarryMaterials.has(o.material)){const m=o.material.clone();m.onBeforeCompile=o.material.onBeforeCompile;m.customProgramCacheKey=o.material.customProgramCacheKey;m.vertexColors=true;m.name='Dressed sanctuary stone — restrained quarry variation';quarryMaterials.set(o.material,m);}
+    const facingMaterial=quarryMaterials.get(o.material);
+    for(let i=0;i<o.count;i++) {
+      o.getMatrixAt(i,matrix);matrix.decompose(position,rotation,scale);
+      const xFace=scale.x<.15, sign=xFace?(position.x<-60?-1:1):Math.sign(position.z);
+      const axis=xFace?'x':'z',oldDepth=scale[axis],wallPlane=position[axis]-sign*oldDepth/2;
+      position[axis]=wallPlane-sign*.0135;scale[axis]=.055;
+      const shade=.985+.03*(.5+.5*Math.sin(position.x*2.73+position.y*4.19+position.z*1.63));
+      const warmth=.002*Math.sin(position.x*1.71+position.z*3.19);
+      block(o.parent,position.x,position.y,position.z,scale.x,scale.y,scale.z,facingMaterial,.006,false,[shade+warmth,shade,shade-warmth]);dressedBlocks++;
+    }
+    removedTriangles+=(o.geometry.index?o.geometry.index.count:o.geometry.attributes.position.count)/3*o.count;
+    // The original unit-box geometry is shared with other scene instances.
+    o.parent.remove(o);
+  }
+
+  // Twelve broad original treads, remade from separate dressed limestone
+  // units. Each rounded nose stays inside the old footprint. The shared
+  // central traffic path lowers the tread by at most 18 mm; the flight is
+  // cared for, not a ruin. Tiny losses are limited to a handful of arrises.
+  const oldSteps=sanctuary.getObjectByName('Twelve porch steps');
+  if(oldSteps) {
+    removedTriangles+=(oldSteps.geometry.index?oldSteps.geometry.index.count:oldSteps.geometry.attributes.position.count)/3*oldSteps.count;
+    oldSteps.parent.remove(oldSteps); // Its unit geometry is shared elsewhere.
+    for(let stair=0;stair<12;stair++) {
+      const height=3-stair*.25,cx=-23.48+stair*.58,nominal=2.15,offset=stair%2?nominal*.5:0,cuts=[-15.8];
+      for(let z=-15.8+nominal-offset;z<15.75;z+=nominal)if(z>-15.75)cuts.push(z);cuts.push(15.8);
+      for(let stone=0;stone<cuts.length-1;stone++) {
+        const z0=cuts[stone]+(stone? .006:0),z1=cuts[stone+1]-(stone<cuts.length-2?.006:0),seed=stable(stair+31,stone+19),chipped=seed>.9985;
+        const chipZ=z0+(z1-z0)*(.25+.5*stable(stone+81,stair)),samples=[z0,z0+.006,z0+.025,z0+(z1-z0)*.28,z0+(z1-z0)*.55,z0+(z1-z0)*.80,z1-.025,z1-.006,z1];
+        if(chipped){samples.push(chipZ-.045,chipZ,chipZ+.045);counts.smallNoseChips++;}
+        samples.sort((a,b)=>a-b);
+        const section=[[-.3,.006],[-.3,height-.003],[-.297,height],[-.12,height],[.07,height],[.255,height]];
+        for(let j=1;j<=8;j++){const a=j/8*Math.PI/2;section.push([.255+.045*Math.sin(a),height-.045+.045*Math.cos(a)]);}
+        section.push([.3,.006],[.294,0],[-.294,0]);
+        const p=[],idx=[],uv=[],n=section.length;
+        for(const z of samples)for(const [x,y]of section) {
+          const path=Math.exp(-Math.pow(z/5.8,4)),onTop=smooth((y-(height-.15))/.15),edge=Math.min(z-z0,z1-z),joint=.003*(1-smooth(edge/.008));
+          const toe=.35+.65*smooth((x+.20)/.48),wear=.018*path*toe*onTop;
+          const chip=chipped?.009*Math.exp(-Math.pow((z-chipZ)/.024,2))*smooth((x-.23)/.06)*onTop:0;
+          p.push(cx+x,5.4+y-wear-joint*onTop-chip,z);uv.push((x+.3)/.6,z/2.15);
+        }
+        for(let row=0;row<samples.length-1;row++)for(let j=0;j<n;j++){const a=row*n+j,b=row*n+(j+1)%n,c=a+n,d=b+n;idx.push(a,c,b,b,c,d);}
+        for(const row of[0,samples.length-1]) {
+          const start=p.length/3;
+          for(let j=0;j<n;j++){const i=row*n+j;p.push(p[i*3],p[i*3+1],p[i*3+2]);uv.push(0,0);}
+          const center=p.length/3;p.push(cx,5.4+height*.40,samples[row]);uv.push(.5,.5);
+          for(let j=0;j<n;j++){const a=start+j,b=start+(j+1)%n;if(row===0)idx.push(center,a,b);else idx.push(center,b,a);}
+        }
+        loose(sanctuary,geometry(p,idx,uv),mats.stoneLight);counts.wornStepStones++;
+      }
+    }
+  }
+
+  // A closed mitered rectangular molding. The profile returns behind the
+  // wall face; its corona has a real underside and its top cannot float.
+  function horizontalProfile(parent,x,z,w,d,base,profile,material=mats.stoneLight) {
+    const p=[],idx=[],uv=[];
+    for(let side=0;side<4;side++) {
+      const start=p.length/3;
+      for(const [outset,rise] of profile) {
+        const a=w/2+outset,b=d/2+outset,corners=[[-a,-b],[a,-b],[a,b],[-a,b]];
+        for(const k of [side,(side+1)%4]) {p.push(x+corners[k][0],base+rise,z+corners[k][1]);uv.push(k===side?0:(side%2?d:w),rise);}
+      }
+      for(let row=0;row<profile.length-1;row++){const a=start+row*2;idx.push(a,a+2,a+1,a+1,a+2,a+3);}
+    }
+    loose(parent,geometry(p,idx,uv),material);counts.cornices++;
+  }
+  const baseSection=[[-.08,0],[.24,0],[.24,.12],[.21,.17],[.13,.23],[.05,.27],[.02,.34],[.04,.42],[.11,.48],[.16,.55],[.17,.63],[.11,.69],[.04,.73],[.04,.83],[-.08,.83],[-.08,0]];
+  for(const sign of [-1,1]) {
+    const parent=sign<0?north:sanctuary;
+    horizontalProfile(parent,-29,sign*17.5,10.4,15.4,8.82,baseSection);
+    horizontalProfile(parent,-54,sign*10.9,40.15,8.15,8.48,baseSection.map(a=>[a[0]*.8,a[1]*.8]));
+    // Continuous intermediate floor ledges have a drip, not dark painted seams.
+    for(const y of [15.7,22.7]) horizontalProfile(parent,-54,sign*10.9,40.05,8.05,y,[[-.05,0],[.12,0],[.12,.07],[.19,.12],[.19,.19],[.11,.23],[-.05,.23],[-.05,0]]);
+  }
+
+  // Replace the old six nested ribbons with a carved solid U architrave.
+  // Profile sections are mitered through the lintel corners and end-capped
+  // at the threshold, so gold has depth when examined from the side.
+  stripDetails(['Sculpted limestone moldings and nested portal reveals'],[[-24.48,-22.62,8.58,41.12,-10.47,10.47],[-35.25,-22.70,54.72,56.36,-26.30,26.30]]);
+  stripDetails(['Sanctuary v2 — carved capitals, flutes and architectural relief'],[[-22.98,-22.84,8.60,40.61,-10.03,10.03]]);
+  function architrave(parent,x,base,halfWidth,top,profile,material) {
+    const p=[],idx=[],uv=[],paths=[];
+    for(const [outset,projection] of profile) paths.push([[-halfWidth-outset,base],[-halfWidth-outset,top+outset],[halfWidth+outset,top+outset],[halfWidth+outset,base]].map(a=>[x+projection,a[1],a[0]]));
+    for(let side=0;side<3;side++) {
+      const start=p.length/3;
+      for(let row=0;row<paths.length;row++)for(const k of [side,side+1]){p.push(...paths[row][k]);uv.push(k===side?0:1,row/(paths.length-1));}
+      for(let row=0;row<paths.length-1;row++){const a=start+row*2;idx.push(a,a+2,a+1,a+1,a+2,a+3);}
+    }
+    // Triangulate the closed cross-section at both ends of the U.
+    const section=profile.map(a=>new T.Vector2(a[0],a[1])),caps=T.ShapeUtils.triangulateShape(section,[]);
+    for(const side of [0,3]) {
+      const start=p.length/3;for(const path of paths){p.push(...path[side]);uv.push(0,0);}
+      for(const cap of caps)idx.push(...(side===0?cap:cap.slice().reverse()).map(k=>start+k));
+    }
+    loose(parent,geometry(p,idx,uv),material);
+  }
+  const outerStone=[[0,0],[0,.12],[.025,.16],[.065,.20],[.10,.24],[.12,.30],[.10,.35],[.05,.39],[.05,.44],[.39,.44],[.44,.39],[.44,-.07],[0,-.07],[0,0]];
+  architrave(sanctuary,-23.33,8.65,9.98,40.64,outerStone,mats.stoneLight);
+  const outerGold=[[0,0],[0,.16],[.045,.21],[.09,.24],[.13,.31],[.13,.48],[.16,.55],[.22,.61],[.29,.65],[.40,.67],[.40,.76],[.59,.76],[.64,.83],[.66,.92],[.64,1.01],[.58,1.07],[.58,1.13],[.87,1.13],[.96,1.22],[1.02,1.34],[1.10,1.40],[1.15,1.40],[1.15,-.05],[0,-.05],[0,0]];
+  architrave(sanctuary,-24.33,8.65,8.83,39.49,outerGold,mats.gold);
+
+  // Proper assembled crown: the main wall carries a carved architrave,
+  // spaced dentils, a deeply projecting corona/drip, a cyma and the coping.
+  // The closed body also seats the previous 0.24 m floating coping gap.
+  block(roofs,-29,55.65,0,10.45,1.90,50.45,mats.stoneLight,.018);
+  const crown=[[-.08,0],[.10,0],[.10,.13],[.24,.16],[.24,.26],[.10,.31],[.10,.39],[.17,.43],[.17,.78],[.38,.78],[.38,.89],[.70,.89],[.70,1.10],[.63,1.14],[.59,1.22],[.59,1.30],[.65,1.39],[.75,1.46],[.84,1.53],[.87,1.62],[.87,1.72],[-.08,1.72],[-.08,0]];
+  horizontalProfile(roofs,-29,0,10.45,50.45,54.80,crown);
+  for(const sign of [-1,1]) {
+    for(let z=-24.6;z<=24.6;z+=.74)block(roofs,-29+sign*5.40,55.38,z,.49,.36,.34,mats.stoneLight,.015);
+    for(let x=-33.6;x<=-24.4;x+=.74)block(roofs,x,55.38,sign*25.40,.34,.36,.49,mats.stoneLight,.015);
+  }
+  horizontalProfile(roofs,-29,0,10.50,50.50,56.55,[[-.05,0],[.06,0],[.09,.07],[.09,.14],[.03,.19],[-.05,.19],[-.05,0]]);
+
+  // A broad gilded frieze under the crown is based on the museum model's
+  // architectural reading; exact plating divisions remain interpretive.
+  for(const sign of [-1,1]) {
+    const parent=sign<0?north:sanctuary;
+    block(parent,-23.925,53.62,sign*17.5,.13,1.58,15.03,mats.gold,.010);
+    for(const y of [52.78,54.46])block(parent,-23.82,y,sign*17.5,.16,.10,15.08,mats.gold,.014);
+  }
+  block(roofs,-23.925,53.62,0,.13,1.58,20.02,mats.gold,.010);
+  for(const y of [52.78,54.46])block(roofs,-23.82,y,0,.16,.10,20.02,mats.gold,.014);
+  // Remove the isolated modern-looking square rosettes, leaving calm dressed
+  // white stone between the pilaster order and continuous gilded frieze.
+  const panelRegions=[];
+  for(const z of [-20.4,-14.4,14.4,20.4])panelRegions.push([-24.05,-22.20,47.18,52.22,z-2.48,z+2.48]);
+  stripDetails(['Sanctuary v2 — carved capitals, flutes and architectural relief'],panelRegions);
+  const middlePilasters=[-17.4,17.4].map(z=>[-24.8,-22.1,10.15,46.30,z-1.65,z+1.65]);
+  stripDetails(['Baked architectural details','Sanctuary v2 — carved capitals, flutes and architectural relief'],middlePilasters);
+
+  // A low, coherent botanical register, not a row of applied medallions.
+  // Palmettes alternate with pomegranates over one flowing branch; all
+  // figures remain plants. Its three spans follow the cutaway wall parents.
+  for(const [from,to,parent]of[[-25,-10,north],[-10,10,roofs],[10,25,sanctuary]]) {
+    const modules=Math.round((to-from)/2.1),span=(to-from)/modules;
+    for(let i=0;i<modules;i++) {
+      const z=from+(i+.5)*span,x=-23.832,base=53.25;
+      tube(parent,[[x,base,from+i*span],[x+.008,base+.065,z-.44],[x,base+.005,z],[x+.012,base+.09,z+.44],[x,base,from+(i+1)*span]],.026,mats.gold,28,10);
+      for(const sign of[-1,1])friezeLeaf(parent,x,base+.01,z+sign*.59,sign*1.05,.25,.035);
+      if(i%2===0) {
+        for(const angle of[-.95,-.49,0,.49,.95])friezeLeaf(parent,x,base+.10,z,angle,.70,.069);
+        for(const sign of[-1,1]) {
+          const points=[];
+          for(let j=0;j<=32;j++){const t=j/32,a=-Math.PI*.57+t*Math.PI*2.05,r=.19*(1-t)+.022;points.push([x+.025,base+.17+Math.sin(a)*r,z+sign*(.27+Math.cos(a)*r)]);}
+          tube(parent,points,.020,mats.gold,36,8);
+        }
+      } else {
+        tube(parent,[[x,base,z],[x+.016,base+.20,z-.06],[x+.024,base+.31,z]],.025,mats.gold,18,10);
+        const fruit=new T.SphereGeometry(1,24,16);fruit.scale(.080,.225,.170);
+        loose(parent,fruit,mats.gold,[x+.025,base+.51,z]);
+        for(const angle of[-.55,0,.55])friezeLeaf(parent,x+.02,base+.705,z,angle,.14,.022);
+      }
+      counts.botanicalFriezeModules++;
+    }
+  }
+
+  // The inner entrance and wall around it were gilded (War 5.5.4). Gold
+  // sheets here cover real wall faces and folded reveals, not a flat sticker
+  // suspended in the porch opening. The door recess retains its full depth.
+  block(roofs,-34.425,31.32,0,.13,15.78,13.12,mats.gold,.012);
+  for(const sign of [-1,1]) {
+    const parent=sign<0?north:sanctuary;
+    // Full-depth porch returns replace the old shallow, exposed gray planes.
+    // The foil is seated against a solid wall tied into the white porch wing.
+    block(parent,-29.16,24.00,sign*9.415,9.75,30.60,1.30,mats.stoneLight,.012);
+    block(parent,-29.16,24.00,sign*8.732,9.73,30.55,.078,mats.gold,.010);
+    for(const y of [8.96,39.05])block(parent,-29.16,y,sign*8.671,9.74,.12,.13,mats.gold,.015);
+    block(parent,-36.52,15.92,sign*4.94,4.08,14.54,3.28,mats.stoneLight,.015);
+    block(parent,-34.425,15.92,sign*4.94,.13,14.54,3.28,mats.gold,.012);
+    block(parent,-36.48,15.92,sign*3.285,4.03,14.54,.10,mats.gold,.010);
+    for(const y of [9.08,22.81])block(parent,-36.48,y,sign*3.19,4.03,.15,.18,mats.gold,.020);
+    // Folded sheet joints and narrow raised fillets emphasize the deep plane.
+    for(const x of [-37.72,-36.50,-35.28])block(parent,x,15.92,sign*3.215,.07,13.55,.07,mats.gold,.010);
+  }
+  block(roofs,-36.50,23.30,0,4.10,.28,13.16,mats.gold,.015);
+  architrave(sanctuary,-34.42,8.65,3.24,23.24,[[0,0],[0,.12],[.07,.20],[.12,.23],[.16,.30],[.18,.41],[.16,.49],[.10,.55],[.10,.62],[.34,.62],[.43,.54],[.43,-.08],[0,-.08],[0,0]],mats.gold);
+  block(sanctuary,-36.53,8.68,0,4.10,.11,6.55,mats.stoneLight,.015);
+  for(const z of [-2.93,0,2.93])block(sanctuary,-34.28,8.75,z,.48,.08,.13,mats.gold,.010);
+
+  // Recessed raised-panel gilded joinery. Individual parts have real edge
+  // radii, substantial stiles/rails, hinge barrels and ring backplates.
+  for(const sign of [-1,1]) {
+    const door=sanctuary.getObjectByName(sign<0?'North gilded door leaf':'South gilded door leaf');
+    if(!door)continue;
+    for(const child of [...door.children])if(child.isMesh){removedTriangles+=(child.geometry.index?child.geometry.index.count:child.geometry.attributes.position.count)/3;door.remove(child);child.geometry.dispose();}
+    const z=-sign*1.45;
+    block(door,0,6,z,.30,12,2.90,mats.wood,.020);
+    block(door,.172,6,z,.055,11.98,2.88,mats.gold,.010);
+    for(const offset of [-1.33,1.33])block(door,.235,6,z+offset,.13,11.88,.20,mats.gold,.025);
+    for(const y of [.18,3.0,6.0,9.0,11.82])block(door,.235,y,z,.13,.23,2.70,mats.gold,.022);
+    for(let row=0;row<4;row++) {
+      const y=1.57+row*2.90;
+      // A closed mitered panel molding, oriented in the door's YZ plane.
+      const p=[],idx=[],uv=[],profile=[[0,0],[.025,.025],[.055,.07],[.075,.09],[.11,.095],[.14,.06],[.16,.015],[.16,-.015],[0,-.015],[0,0]];
+      for(let side=0;side<4;side++) {
+        const start=p.length/3;
+        for(const [outset,projection]of profile){const a=1.035+outset,b=1.155+outset,c=[[-a,-b],[a,-b],[a,b],[-a,b]];for(const k of[side,(side+1)%4]){p.push(.206+projection,y+c[k][1],z+c[k][0]);uv.push(k===side?0:1,outset);}}
+        for(let j=0;j<profile.length-1;j++){const a=start+j*2;idx.push(a,a+1,a+2,a+1,a+3,a+2);}
+      }
+      loose(door,geometry(p,idx,uv),mats.gold);
+      block(door,.228,y,z,.055,2.18,1.96,mats.gold,.035);
+    }
+    for(const y of [1.1,5.95,10.85]) {
+      loose(door,new T.CylinderGeometry(.095,.095,.48,24),mats.gold,[.11,y,sign*.015]);
+      block(door,.28,y,z+sign*.94,.055,.15,.70,mats.gold,.018);
+    }
+    const hz=z-sign*.70;
+    const backplate=new T.SphereGeometry(1,20,12);backplate.scale(.028,.21,.16);
+    loose(door,backplate,mats.gold,[.33,5.65,hz]);
+    loose(door,new T.TorusGeometry(.19,.031,12,40),mats.gold,[.385,5.55,hz],[0,Math.PI/2,0]);
+    counts.doorLeaves++;
+  }
+
+  // Coffered porch soffit: limestone structural cross rails enclose recessed
+  // gilt panels. Every panel sits under the removable ceiling, with beveled
+  // frames and a real 140 mm recess rather than a printed checkerboard.
+  for(let ix=0;ix<3;ix++)for(let iz=0;iz<6;iz++) {
+    const x=-32.10+ix*3.05,z=-7.35+iz*2.94;
+    block(roofs,x,39.255,z,2.85,.10,2.73,mats.gold,.018);
+    block(roofs,x,39.10,z-1.30,2.91,.22,.18,mats.stoneLight,.025);
+    block(roofs,x,39.10,z+1.30,2.91,.22,.18,mats.stoneLight,.025);
+    block(roofs,x-1.35,39.10,z,.18,.22,2.47,mats.stoneLight,.025);
+    block(roofs,x+1.35,39.10,z,.18,.22,2.47,mats.stoneLight,.025);
+    counts.cofferPanels++;
+  }
+
+  // Window voussoirs are true curved wedges with 10 mm radial joints. The
+  // splayed reveal recedes into an opaque unclaimed chamber, matching the
+  // existing reconstruction's treatment without inventing room interiors.
+  const windowRegions=[];
+  const windowSpecs=[];
+  for(const sign of[-1,1]) {
+    const parent=sign<0?north:sanctuary;
+    for(let row=0;row<3;row++)for(let i=0;i<7;i++)windowSpecs.push({parent,x:-70.6+i*5.4,y:10.4+row*7,z:sign*15,sign,w:1.05,h:2.35});
+    for(let i=0;i<8;i++)windowSpecs.push({parent:roofs,x:-70.8+i*4.6,y:39.2,z:sign*7,sign,w:1.25,h:3.4});
+  }
+  for(const s of windowSpecs)windowRegions.push([s.x-s.w/2-.35,s.x+s.w/2+.35,s.y-.20,s.y+s.h+.29,s.z-.36,s.z+.36]);
+  stripDetails(['Baked architectural details'],windowRegions);
+  function windowDetail(s) {
+    const {parent,x,y,z,sign,w,h}=s,r=w/2,spring=h-r,front=.29,back=.025,ro=r+.31,ri=r+.11;
+    const opening=new T.Shape();opening.moveTo(-r,0);opening.lineTo(r,0);opening.lineTo(r,spring);opening.absarc(0,spring,r,0,Math.PI,false);opening.closePath();
+    loose(parent,new T.ShapeGeometry(opening,24),mats.dark,[x,y,z+sign*back],[0,sign<0?Math.PI:0,0],false);
+    // Continuous inner splay, split only at the jamb/arch tangency.
+    const p=[],idx=[],uv=[];
+    const arc=[];arc.push([-r,0],[-r,spring]);for(let j=1;j<=24;j++){const a=Math.PI-j/24*Math.PI;arc.push([Math.cos(a)*r,spring+Math.sin(a)*r]);}arc.push([r,0]);
+    for(let i=0;i<arc.length;i++){const a=arc[i],rr=i===0||i===arc.length-1?Math.sign(a[0])*ri:a[0]/r*ri;const yy=i===0||i===arc.length-1?-.04:spring+(a[1]-spring)/r*ri;p.push(x+a[0],y+a[1],z+sign*back,x+rr,y+yy,z+sign*front);uv.push(0,0,1,1);}
+    for(let j=0;j<arc.length-1;j++){const a=j*2;if(sign>0)idx.push(a,a+2,a+1,a+1,a+2,a+3);else idx.push(a,a+1,a+2,a+1,a+3,a+2);}
+    loose(parent,geometry(p,idx,uv),mats.stoneLight);
+    const pieces=9;
+    for(let j=0;j<pieces;j++) {
+      const joint=.010/(ri+ro),a0=j/pieces*Math.PI+joint,a1=(j+1)/pieces*Math.PI-joint,shape=new T.Shape();
+      shape.moveTo(Math.cos(a0)*ri,spring+Math.sin(a0)*ri);shape.absarc(0,spring,ri,a0,a1,false);shape.lineTo(Math.cos(a1)*ro,spring+Math.sin(a1)*ro);shape.absarc(0,spring,ro,a1,a0,true);shape.closePath();
+      const g=new T.ExtrudeGeometry(shape,{depth:.27,bevelEnabled:true,bevelSize:.006,bevelThickness:.006,bevelSegments:2,curveSegments:5,steps:1});
+      loose(parent,g,mats.stoneLight,[x,y,z+sign*.025],[0,sign<0?Math.PI:0,0]);
+    }
+    const rows=Math.ceil(spring/.48),height=spring/rows;
+    for(const side of[-1,1])for(let j=0;j<rows;j++)block(parent,x+side*(ri+ro)/2,y+(j+.5)*height,z+sign*.16,ro-ri,height-.01,.27,mats.stoneLight,.006);
+    block(parent,x,y-.08,z+sign*.20,w+.76,.18,.58,mats.stoneLight,.012);windows++;
+  }
+  for(const s of windowSpecs)windowDetail(s);
+
+  // Sheet courses align to architectural fields; the white wings, carved
+  // frames, and door joinery keep their separate dressed construction.
+  goldField(roofs,'x',-34.36,-6.56,6.56,23.43,39.21,1);
+  for(const sign of[-1,1]) {
+    const parent=sign<0?north:sanctuary;
+    goldField(parent,'z',sign*8.693,-34.025,-24.295,8.725,39.275,-sign);
+    goldField(parent,'x',-34.36,sign<0?-6.58:3.30,sign<0?-3.30:6.58,8.65,23.19,1);
+    goldField(parent,'z',sign*3.235,-38.495,-34.465,8.65,23.19,-sign);
+    goldField(parent,'x',-23.86,sign<0?-25.015:10.01,sign<0?-10.01:25.015,52.83,54.41,1,1.80,1.58);
+  }
+  goldField(roofs,'x',-23.86,-10.01,10.01,52.83,54.41,1,1.80,1.58);
+
+  // A living, asymmetrical gilded vine above the INNER entrance. Thin
+  // chased grape leaves and staggered clusters replace the outer spike rail.
+  const vine=sanctuary.getObjectByName('Golden grapevine above the sanctuary entrance');
+  if(vine) {
+    // Its backing is the removable upper entrance wall; both must disappear
+    // together in cutaway rather than leaving gold branches in empty space.
+    roofs.add(vine);
+    for(const child of[...vine.children])if(child.isMesh){removedTriangles+=(child.geometry.index?child.geometry.index.count:child.geometry.attributes.position.count)/3*(child.isInstancedMesh?child.count:1);vine.remove(child);child.geometry.dispose();}
+    const vx=-34.22,vy=25.42;
+    tube(vine,[[vx,vy,-4.70],[vx+.12,vy+.38,-3.10],[vx+.03,vy+.08,-1.20],[vx+.16,vy+.46,.9],[vx+.04,vy+.18,3.1],[vx+.11,vy+.52,4.75]],.080,mats.gold,72,12);
+    const berries=[];
+    for(let cluster=0;cluster<7;cluster++) {
+      const z=-4.10+cluster*1.34,raise=.10+.24*Math.sin(cluster*2.1),cy=vy+.03+raise;
+      tube(vine,[[vx+.05,vy+.20,z-.22],[vx+.20,cy+.22,z],[vx+.30,cy-.09,z+.12]],.032,mats.gold,18,8);
+      for(let row=0;row<5;row++) {
+        const cols=Math.max(1,4-Math.floor(row*.75));
+        for(let k=0;k<cols;k++) {
+          const r=.125+.018*Math.sin(cluster*3+row*2+k),zz=z+(k-(cols-1)/2)*.235+(row%2)*.055;
+          berries.push([vx+.25+.065*Math.cos(k*2+row),cy-.12-row*.22,zz,r]);
+          if(row<3&&k<cols-1)berries.push([vx+.08,cy-.20-row*.22,zz+.12,r*.95]);
+        }
+      }
+      // Branches diverge and leaves turn back toward the plated wall.
+      const direction=cluster%2?1:-1,leafZ=z+direction*.43,leafY=cy+.38;
+      tube(vine,[[vx+.07,cy+.09,z],[vx+.19,leafY-.10,leafZ],[vx+.22,leafY+.14,leafZ+direction*.16]],.025,mats.gold,18,8);
+      const anchorY=leafY+.14,anchorZ=leafZ+direction*.16;
+      const leafPoint=(u,v,lift=0)=>{
+        const t=(v-.14)/.88,fold=.009+.018*Math.abs(u)/.65+.004*Math.sin(Math.PI*Math.max(0,Math.min(1,t)))+.006*Math.pow(Math.max(0,t),4)+.002*Math.sin(v*10+cluster)*u;
+        return[vx+.22+fold+lift,anchorY+(v-.14)*.93,anchorZ+u*.83+direction*(v-.14)*.10];
+      };
+      // Five lobes, a basal cleft and small irregular teeth give a grape-leaf
+      // silhouette. Its shallow V fold is sheet metal, not an inflated dome.
+      const outline=[[0,.14],[-.19,.04],[-.44,.07],[-.52,.18],[-.44,.28],[-.65,.40],[-.52,.53],[-.58,.73],[-.35,.67],[-.31,.86],[-.14,.77],[0,1.02],[.16,.76],[.33,.85],[.36,.66],[.59,.72],[.52,.52],[.64,.39],[.44,.28],[.51,.17],[.43,.07],[.18,.04]],boundary=[];
+      for(let k=0;k<outline.length;k++) {
+        const a=outline[k],b=outline[(k+1)%outline.length],du=b[0]-a[0],dv=b[1]-a[1],length=Math.hypot(du,dv),tooth=.008+.009*stable(k+cluster,k*.23);
+        boundary.push(a,[(a[0]+b[0])/2-dv/length*tooth,(a[1]+b[1])/2+du/length*tooth]);
+      }
+      const p=[],idx=[],uv=[],rings=5,n=boundary.length,center=[0,.48];
+      p.push(...leafPoint(...center));uv.push(.5,.48);
+      for(let ring=1;ring<=rings;ring++) {
+        const t=ring/rings;
+        for(const edge of boundary){const u=center[0]+(edge[0]-center[0])*t,v=center[1]+(edge[1]-center[1])*t;p.push(...leafPoint(u,v));uv.push((u+.65)/1.30,v);}
+      }
+      for(let k=0;k<n;k++)idx.push(0,1+k,1+(k+1)%n);
+      for(let ring=0;ring<rings-1;ring++)for(let k=0;k<n;k++){const a=1+ring*n+k,b=1+ring*n+(k+1)%n,c=a+n,d=b+n;idx.push(a,c,b,b,c,d);}
+      const frontCount=p.length/3,frontIndices=idx.slice();
+      for(let i=0;i<frontCount;i++){p.push(p[i*3]-.003,p[i*3+1],p[i*3+2]);uv.push(uv[i*2],uv[i*2+1]);}
+      for(let i=0;i<frontIndices.length;i+=3)idx.push(frontIndices[i]+frontCount,frontIndices[i+2]+frontCount,frontIndices[i+1]+frontCount);
+      for(let k=0;k<n;k++){const a=1+(rings-1)*n+k,b=1+(rings-1)*n+(k+1)%n;idx.push(a,b+frontCount,b,a,a+frontCount,b+frontCount);}
+      loose(vine,geometry(p,idx,uv),mats.gold);
+      // Chased primary veins branch from the petiole; fine secondary veins
+      // meet them instead of floating above the blade as separate wires.
+      const vein=(points,radius,segments=16)=>tube(vine,points.map(point=>leafPoint(point[0],point[1],.0012)),radius,mats.gold,segments,6);
+      vein([[0,.14],[.012,.42],[-.009,.72],[0,1.00]],.0038,28);
+      for(const sign of[-1,1]) {
+        vein([[0,.14],[sign*.20,.36],[sign*.40,.56],[sign*.51,.70]],.0032,20);
+        vein([[0,.14],[sign*.24,.26],[sign*.56,.40]],.0030,18);
+        vein([[sign*.006,.53],[sign*.15,.68],[sign*.28,.81]],.0020,14);
+        vein([[sign*.31,.47],[sign*.42,.49],[sign*.50,.53]],.0018,12);
+      }
+      counts.grapeClusters++;
+    }
+    const sphere=new T.SphereGeometry(1,16,10),mesh=new T.InstancedMesh(sphere,mats.gold,berries.length),dummy=new T.Object3D();
+    berries.forEach((b,i)=>{dummy.position.set(b[0],b[1],b[2]);dummy.scale.set(b[3]*.94,b[3]*1.12,b[3]);dummy.updateMatrix();mesh.setMatrixAt(i,dummy.matrix);});
+    mesh.name='Gilded fruit — staggered solid clusters above the inner entrance';mesh.castShadow=true;mesh.receiveShadow=true;mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingBox();mesh.computeBoundingSphere();vine.add(mesh);
+    vine.userData.realismLocation=[vx,vy,0];
+  }
+
+  // Older rosette meshes included collapsed center fans. Remove those
+  // inherited zero-area faces and repair singular normals on surviving faces.
+  let inheritedDegeneratesRemoved=0,inheritedNormalsRepaired=0;
+  sanctuary.traverse(o=>{
+    if(!o.isMesh||o.isInstancedMesh||!['Sanctuary v2 — carved capitals, flutes and architectural relief','Sculpted limestone moldings and nested portal reveals'].includes(o.name))return;
+    const old=o.geometry,g=old.index?old.toNonIndexed():old,p=g.attributes.position,n=g.attributes.normal,uv=g.attributes.uv;
+    const data={position:[],normal:[],uv:[]},a=new T.Vector3(),b=new T.Vector3(),c=new T.Vector3(),normal=new T.Vector3();let removed=0,repaired=0;
+    for(let i=0;i<p.count;i+=3){a.fromBufferAttribute(p,i);b.fromBufferAttribute(p,i+1);c.fromBufferAttribute(p,i+2);normal.subVectors(b,a).cross(c.sub(a));if(normal.lengthSq()<1e-18){removed++;continue;}normal.normalize();for(let k=0;k<3;k++){data.position.push(p.getX(i+k),p.getY(i+k),p.getZ(i+k));const len=n?Math.hypot(n.getX(i+k),n.getY(i+k),n.getZ(i+k)):0;if(len<.1){data.normal.push(normal.x,normal.y,normal.z);repaired++;}else data.normal.push(n.getX(i+k)/len,n.getY(i+k)/len,n.getZ(i+k)/len);data.uv.push(uv?uv.getX(i+k):0,uv?uv.getY(i+k):0);}}
+    if(removed||repaired){const replacement=new T.BufferGeometry();for(const key of['position','normal','uv'])replacement.setAttribute(key,new T.Float32BufferAttribute(data[key],key==='uv'?2:3));replacement.computeBoundingBox();replacement.computeBoundingSphere();o.geometry=replacement;old.dispose();removedTriangles+=removed;inheritedDegeneratesRemoved+=removed;inheritedNormalsRepaired+=repaired;}
+    if(g!==old)g.dispose();
+  });
+  let addedTriangles=0,addedDrawCalls=0,finite=true,badNormals=0;
+  for(const [parent,byMaterial] of batches)for(const data of byMaterial.values()) {
+    const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(data.position,3));g.setAttribute('normal',new T.Float32BufferAttribute(data.normal,3));g.setAttribute('uv',new T.Float32BufferAttribute(data.uv,2));
+    if(data.material.vertexColors)g.setAttribute('color',new T.Float32BufferAttribute(data.color,3));
+    g.computeBoundingBox();g.computeBoundingSphere();
+    for(const value of data.position)if(!Number.isFinite(value))finite=false;
+    for(let i=0;i<data.normal.length;i+=3){const n=Math.hypot(data.normal[i],data.normal[i+1],data.normal[i+2]);if(!Number.isFinite(n))finite=false;if(n<.90||n>1.10)badNormals++;}
+    const mesh=new T.Mesh(g,data.material);mesh.name=data.castShadow?'Sanctuary v3 — dressed construction, gilt joinery and carved profiles':'Sanctuary v3 — fine-jointed dressed stone and recessed dark fields';mesh.castShadow=data.castShadow;mesh.receiveShadow=true;parent.add(mesh);
+    addedTriangles+=data.position.length/9;addedDrawCalls++;
+  }
+  for(const g of cachedBoxes.values())g.dispose();
+  if(vine){const fruit=vine.getObjectByName('Gilded fruit — staggered solid clusters above the inner entrance');if(fruit){addedTriangles+=(fruit.geometry.index?fruit.geometry.index.count:fruit.geometry.attributes.position.count)/3*fruit.count;addedDrawCalls++;}}
+  const stats={addedTriangles,removedTriangles,netTriangles:addedTriangles-removedTriangles,addedDrawCalls,dressedBlocks,windows,pilasters:4,...counts,finite,badNormals,inheritedDegeneratesRemoved,inheritedNormalsRepaired,jointWidth:.015,stoneArris:.006,facadeFacingProjection:.014,goldSheetSeam:.0016,goldSheetEdgeFold:.00025,goldSheetBow:[.003,.008],vineLeafThickness:.003,chasedVeinsPerLeaf:9,maximumTreadWear:.018,closedCopingGap:.24,preservesHolyOfHolies:true,preservesCutaway:true,vinePoint:vine?.userData.realismLocation||null};
+  sanctuary.userData.architecturalRealismV3=stats;world.userData.sanctuaryRealismV3=stats;return stats;
+}
+
 /* Southern approaches: broad stepped flights, a landing at the entrance floor,
    and genuine vaulted openings through the retaining mass. Positions and exact
    profiles remain interpretive; the Double/Triple Gate and passage arrangement
@@ -2702,12 +3614,12 @@ function rebuildSouthernApproaches(T, ctx) {
   let renderer;
   try{renderer=new T.WebGLRenderer({alpha:true,antialias:true,powerPreference:'high-performance'});}catch(e){loading.textContent='This view needs WebGL. Open it in a browser with 3D graphics enabled.';loading.setAttribute('role','alert');return;}
   const mobileGraphics=matchMedia("(max-width: 600px)").matches;
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,mobileGraphics?1.5:1.75));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,mobileGraphics?1.5:2));
   renderer.shadowMap.enabled=true;renderer.shadowMap.autoUpdate=false;renderer.shadowMap.type=T.PCFSoftShadowMap;
-  renderer.outputColorSpace=T.SRGBColorSpace;renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=.85;
+  renderer.outputColorSpace=T.SRGBColorSpace;renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=.78;
   renderer.setClearColor(0,0);host.appendChild(renderer.domElement);
   renderer.domElement.setAttribute('role','img');renderer.domElement.setAttribute('aria-label','3D temple model. Drag to orbit, use two fingers to pan and pinch to zoom. Mouse wheel zooms in Mouse mode. Viewpoint and camera buttons provide alternatives.');
-  const scene=new T.Scene(), camera=new T.PerspectiveCamera(42,1,.08,5000);
+  const scene=new T.Scene(), camera=new T.PerspectiveCamera(38,1,.08,5000);
   const world=new T.Group();scene.add(world);
   const contactRenderer=createTempleContactRenderer(T,renderer,scene,camera);
   renderer.info.autoReset=false;
@@ -2717,6 +3629,7 @@ function rebuildSouthernApproaches(T, ctx) {
   palette=colors();
   const physicalMaterials=createTempleMaterials(T,renderer);
   const {mats,masonry,paving}=physicalMaterials;
+  const materialRealism=refineTempleMaterials(T,{mats,renderer,root});
   // A small real bevel catches the light; silhouettes no longer have razor edges.
   const boxCache=new Map();
   function softBox(w,h,d,requested=.075){
@@ -2743,23 +3656,20 @@ function rebuildSouthernApproaches(T, ctx) {
   const halo=eq.createRadialGradient(104,65,1,104,65,42);halo.addColorStop(0,'rgba(255,249,224,1)');halo.addColorStop(.12,'rgba(255,249,224,.98)');halo.addColorStop(1,'rgba(255,249,224,0)');eq.fillStyle=halo;eq.fillRect(60,20,90,90);
   const envTexture=new T.CanvasTexture(envCanvas);envTexture.mapping=T.EquirectangularReflectionMapping;envTexture.colorSpace=T.SRGBColorSpace;
   const pmrem=new T.PMREMGenerator(renderer);let envTarget=pmrem.fromEquirectangular(envTexture);scene.environment=envTarget.texture;pmrem.dispose();textureObjects.push(envTexture,envTarget.texture);
+  // Warm the final environment's shader variants before the first visible draw.
+  let resolveEnvironment;const environmentReady=new Promise(resolve=>{resolveEnvironment=resolve;});
   // CC0 captured daylight adds real high-range reflections to gilded surfaces.
   if(window.RGBELoader)new window.RGBELoader().load('./assets/dry_meadow_1k.hdr',hdr=>{
-    if(!root.isConnected){hdr.dispose();return;}
-    hdr.mapping=T.EquirectangularReflectionMapping;const generator=new T.PMREMGenerator(renderer),captured=generator.fromEquirectangular(hdr);generator.dispose();hdr.dispose();envTarget.dispose();envTarget=captured;scene.environment=captured.texture;const calibrated=new Set([masonry,...Object.values(mats)]);scene.traverse(o=>{if(o.material)for(const m of(Array.isArray(o.material)?o.material:[o.material]))if(m.isMeshStandardMaterial)calibrated.add(m);});for(const m of calibrated)m.envMapIntensity=m.metalness>.8?.8:.18;root.dataset.capturedLight='ready';sun.shadow.needsUpdate=true;dirty=true;
-  },undefined,()=>{root.dataset.capturedLight='procedural-fallback';});
-  const sky=new T.Mesh(new T.SphereGeometry(2400,32,16),new T.ShaderMaterial({side:T.BackSide,depthWrite:false,uniforms:{zenith:{value:new T.Color('#6c97bd')},horizon:{value:new T.Color('#d6cbb5')}},vertexShader:'varying vec3 skyDirection; void main(){skyDirection=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',fragmentShader:'varying vec3 skyDirection; uniform vec3 zenith; uniform vec3 horizon; void main(){float h=max(normalize(skyDirection).y,0.0);vec3 col=mix(horizon,zenith,pow(h,.48));gl_FragColor=vec4(col,1.0);#include <tonemapping_fragment>\n#include <colorspace_fragment>}',fog:false}));
-  sky.material.fragmentShader=sky.material.fragmentShader.replace(';#include',';\n#include');sky.renderOrder=-10;scene.add(sky);
-  scene.fog=new T.FogExp2('#d6cbb5',.00072);
-  const groundGeometry=new T.PlaneGeometry(6000,6000,128,128);groundGeometry.rotateX(-Math.PI/2);
-  const gp=groundGeometry.attributes.position;
-  for(let i=0;i<gp.count;i++){const x=gp.getX(i),z=gp.getZ(i),outside=T.MathUtils.smoothstep(Math.max(Math.abs(x)-200,Math.abs(z)-290),0,420);gp.setY(i,-25+outside*(5*Math.sin(x*.008)*Math.cos(z*.006)+2*Math.sin(z*.018)));}
-  groundGeometry.computeVertexNormals();const ground=new T.Mesh(groundGeometry,mats.terrain);ground.name='Surrounding limestone hills — interpretive landscape';ground.receiveShadow=true;scene.add(ground);
-  const hemi=new T.HemisphereLight(0xbad3ed,0x988566,.55);scene.add(hemi);
-  const sun=new T.DirectionalLight(0xfff1d5,3.25);sun.castShadow=true;sun.shadow.mapSize.set(mobileGraphics?2048:4096,mobileGraphics?2048:4096);sun.shadow.camera.near=1;sun.shadow.camera.far=1500;sun.shadow.bias=-.00014;sun.shadow.normalBias=.17;sun.shadow.radius=2;scene.add(sun);scene.add(sun.target);
-  const fill=new T.DirectionalLight(0xb8cbe1,.22);fill.position.set(-200,120,-200);scene.add(fill);
+    if(!root.isConnected){hdr.dispose();resolveEnvironment();return;}
+    hdr.mapping=T.EquirectangularReflectionMapping;const generator=new T.PMREMGenerator(renderer),captured=generator.fromEquirectangular(hdr);generator.dispose();hdr.dispose();envTarget.dispose();envTarget=captured;scene.environment=captured.texture;const calibrated=new Set([masonry,...Object.values(mats)]);scene.traverse(o=>{if(o.material)for(const m of(Array.isArray(o.material)?o.material:[o.material]))if(m.isMeshStandardMaterial)calibrated.add(m);});for(const m of calibrated)m.envMapIntensity=m.userData.templeEnvironmentIntensity??(m.metalness>.8?1.05:.32);root.dataset.capturedLight='ready';sun.shadow.needsUpdate=true;dirty=true;resolveEnvironment();
+  },undefined,()=>{root.dataset.capturedLight='procedural-fallback';resolveEnvironment();});else resolveEnvironment();
+  const daylightSetting=createTempleDaylightSetting(T,{scene,mats});
+  root.dataset.daylightSetting=JSON.stringify(daylightSetting.diagnostics);
+  const hemi=new T.HemisphereLight(0xc5dcf1,0xa49a85,.62);scene.add(hemi);
+  const sun=new T.DirectionalLight(0xfff1d5,3.25);sun.castShadow=true;sun.shadow.mapSize.set(mobileGraphics?2048:4096,mobileGraphics?2048:4096);sun.shadow.camera.near=200;sun.shadow.camera.far=1100;sun.shadow.bias=-.000008;sun.shadow.normalBias=.018;sun.shadow.radius=2;scene.add(sun);scene.add(sun.target);
+  const fill=new T.DirectionalLight(0xb8cbe1,.18);fill.position.set(-200,120,-200);scene.add(fill);
   let shadowSpan=0;const sunDirection=new T.Vector3(1,1,.55).normalize();
-  function updateShadow(){const distance=camera.position.distanceTo(target),span=distance<16?18:distance<60?48:distance<140?85:distance<320?180:370;if(span!==shadowSpan){shadowSpan=span;sun.shadow.camera.left=-span;sun.shadow.camera.right=span;sun.shadow.camera.top=span;sun.shadow.camera.bottom=-span;sun.shadow.camera.updateProjectionMatrix();sun.shadow.needsUpdate=true;}if(sun.target.position.distanceToSquared(target)>.001){sun.target.position.copy(target);sun.shadow.needsUpdate=true;}const position=target.clone().addScaledVector(sunDirection,650);if(sun.position.distanceToSquared(position)>.001){sun.position.copy(position);sun.shadow.needsUpdate=true;}if(sun.shadow.needsUpdate)renderer.shadowMap.needsUpdate=true;}
+  function updateShadow(){const distance=camera.position.distanceTo(target),span=distance<16?18:distance<60?42:distance<140?(['sanctuary','facade','approach','interior','vine'].includes(state.view)?58:85):distance<320?180:370;if(span!==shadowSpan){shadowSpan=span;sun.shadow.camera.left=-span;sun.shadow.camera.right=span;sun.shadow.camera.top=span;sun.shadow.camera.bottom=-span;sun.shadow.camera.updateProjectionMatrix();sun.shadow.needsUpdate=true;}if(sun.target.position.distanceToSquared(target)>.001){sun.target.position.copy(target);sun.shadow.needsUpdate=true;}const position=target.clone().addScaledVector(sunDirection,650);if(sun.position.distanceToSquared(position)>.001){sun.position.copy(position);sun.shadow.needsUpdate=true;}if(sun.shadow.needsUpdate)renderer.shadowMap.needsUpdate=true;}
   const cutawayParts=[],pickables=[];
   function group(id){const g=new T.Group();g.userData.landmark=id;world.add(g);pickables.push(g);return g;}
   const platform=group('mount');
@@ -2822,6 +3732,8 @@ function rebuildSouthernApproaches(T, ctx) {
   root.dataset.sanctuary=JSON.stringify(sanctuaryDiagnostics);
   const carvingDiagnostics=enrichSanctuaryDetail(T,{world,mats,box,instance,cutawayParts});
   root.dataset.carving=JSON.stringify(carvingDiagnostics);
+  const sanctuaryRealism=refineSanctuaryRealism(T,{world,mats});
+  root.dataset.sanctuaryRealism=JSON.stringify(sanctuaryRealism);
   const architectureDiagnostics=enhanceTempleArchitecture(T,{world,mats,box,instance,cutawayParts,pickables,group});
   root.dataset.architecture=JSON.stringify(architectureDiagnostics);
   const colonnadeDiagnostics=enrichTempleColonnades(T,{world,mats,box,instance,cutawayParts});
@@ -2838,13 +3750,13 @@ function rebuildSouthernApproaches(T, ctx) {
   box(stoa,0,1.08,204,276,.10,8.5,mats.mosaic);
   const landmarks={
     mount:{title:'Temple Mount',text:'A vast raised precinct: retaining walls, open courts, porticoes, and the sanctuary.',point:[0,10,60],view:'overview'},
-    sanctuary:{title:'Temple sanctuary',text:'A broad east-facing façade, side chambers, gold ornament, and the raised sacred interior.',point:[-29,60,0],view:'sanctuary'},
+    sanctuary:{title:'Temple sanctuary',text:'Dressed white stone, a continuous gilded frieze, carved cornices and a deep gold-lined inner entrance. Detailed profiles and finishes remain interpretive.',point:[-29,60,0],view:'sanctuary'},
     holies:{title:'Holy of Holies',text:'The western inner chamber behind the veil. Josephus describes it as empty; no Ark is shown.',point:[-64,12,0],view:'interior'},
     menorah:{title:'Seven-branched menorah',text:'The southern lampstand is modeled 1.5 m high from the traditional 18 handbreadths. Its detailed form is interpretive.',point:[-47.6,10.3,3.05],view:'menorah'},
     bread:{title:'Table of the bread',text:'The northern table holds twelve loaves. Traditional cubit proportions guide its dimensions; details remain interpretive.',point:[-47.3,9.8,-3.02],view:'bread'},
     incense:{title:'Golden incense altar',text:'A small gold-covered altar with projecting horns stood before the inner curtain, modeled about 1 m high.',point:[-56.65,9.8,0],view:'incense'},
     veil:{title:'Sanctuary veil',text:'A tall woven curtain divides the Holy Place from the empty Holy of Holies; its colors and weave are interpretive.',point:[-59,20,0],view:'veil'},
-    vine:{title:'Golden grapevine',text:'Golden vines and grape clusters adorned the sanctuary entrance, according to Josephus.',point:[-23,44,0],view:'vine'},
+    vine:{title:'Golden grapevine',text:'A branching golden vine and substantial clusters hang over the gilded inner entrance, following Josephus and Middot. Its exact arrangement is interpretive.',point:[-34.2,25.6,0],view:'vine'},
     women:{title:'Court of Women',text:'The eastern court, corner chambers, and gallery; fifteen semicircular steps lead toward the inner court.',point:[56,5,0],view:'court'},
     nicanor:{title:'Nicanor Gate',text:'The gateway above the curved steps; the bronze-colored doors follow the tradition in Middot.',point:[18.5,20,0],view:'court'},
     israel:{title:'Court of Israel',text:'A narrow strip immediately inside the gate, adjoining the larger priestly court.',point:[15,7,-15],view:'court'},
@@ -2866,8 +3778,8 @@ function rebuildSouthernApproaches(T, ctx) {
     overview:{eye:[355,245,445],target:[0,4,28]},approach:{eye:[72,5.0,0],target:[-35,24,0]},east:{eye:[270,108,96],target:[-5,12,0]},
     court:{eye:[121,87,-119],target:[-18,12,0]},interior:{eye:[-35,43,-55],target:[-52,14,0]},
     menorah:{eye:[-45,11,0],target:[-47.6,9.4,3.05]},bread:{eye:[-44.5,10.8,-6],target:[-47.3,9.2,-3.02]},
-    incense:{eye:[-54,10.8,-3.3],target:[-56.65,9.2,0]},veil:{eye:[-48,22,-15],target:[-59,16,0]},vine:{eye:[-2,48,18],target:[-23,43,0]},
-    sanctuary:{eye:[57,42,68],target:[-42,27,0]},altar:{eye:[46,34,-43],target:[-8,8,0]},
+    incense:{eye:[-54,10.8,-3.3],target:[-56.65,9.2,0]},veil:{eye:[-48,22,-15],target:[-59,16,0]},vine:{eye:[-18,28.8,7],target:[-34.2,25.6,0]},
+    sanctuary:{eye:[48,39,70],target:[-36,31,0]},facade:{eye:[63,33,30],target:[-31,32,0]},altar:{eye:[46,34,-43],target:[-8,8,0]},
     stoa:{eye:[128,3.2,204],target:[-18,8.5,204]},capital:{eye:[126,17.1,202.5],target:[123,16.7,199]},gateway:{eye:[-8,-12.8,247],target:[-8,-8.9,225]},vault:{eye:[-8,-12.8,230],target:[-8,-9.8,206]},antonia:{eye:[-209,104,-299],target:[-119,24,-204]},
     south:{eye:[129,33,344],target:[19,-7,236]},arch:{eye:[-250,39,232],target:[-162,-3,174]}
   };
@@ -2877,24 +3789,29 @@ function rebuildSouthernApproaches(T, ctx) {
   const defaultNavigation=matchMedia('(pointer:coarse)').matches?'touch':/Mac/i.test(navigator.platform)?'trackpad':'mouse';
   let state={navigation:defaultNavigation,view:'sanctuary',landmark:'sanctuary',cutaway:false,labels:false,sun:28,tour:-1};
   let target=new T.Vector3(...views.sanctuary.target),radius=1,theta=0,phi=1,flight=null,dirty=true;
-  let selectedMeshes=[],navigation=null;
+  let navigation=null;
   const prefersReduced=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const cameraFloors={stoa:1.18,approach:3.48,gateway:-14.32,vault:-14.32,interior:8.68,menorah:8.68,bread:8.68,incense:8.68,capital:1.18};
+  materialRealism.ready.then(()=>{if(root.isConnected){updateTheme();dirty=true;}});
+  const cameraFloors={stoa:1.18,approach:3.48,gateway:-14.32,vault:-14.32,interior:8.68,menorah:8.68,bread:8.68,incense:8.68,capital:1.18,facade:8.68,vine:8.68};
   function syncSpherical(){const v=camera.position.clone().sub(target);radius=v.length();theta=radius>1e-8?Math.atan2(v.x,v.z):0;phi=radius>1e-8?Math.acos(T.MathUtils.clamp(v.y/radius,-1,1)):.025;}
   function stopFlight(){if(flight){syncSpherical();flight=null;}}
   function cameraFromSpherical(){const constrained=templeConstrainCameraSphere({radius,phi,targetY:target.y},cameraFloors[state.view]??-24.75);radius=constrained.radius;phi=constrained.phi;target.y=constrained.targetY;camera.position.set(target.x+radius*Math.sin(phi)*Math.sin(theta),target.y+radius*Math.cos(phi),target.z+radius*Math.sin(phi)*Math.cos(theta));camera.lookAt(target);dirty=true;}
-  function setView(id,animate=true){navigation?.cancel();const narrow=stage.clientWidth<520;const v=id==='sanctuary'&&narrow?{eye:[73,39,16],target:[-35,28,0]}:(views[id]||views.overview);state.view=id;const aspect=stage.clientWidth/stage.clientHeight,fit=Math.max(1,(id==='sanctuary'&&narrow?.74:id==='overview'?1.4:1)/aspect),fitted=templeFitCameraPreset(v.eye,v.target,fit,cameraFloors[id]??-24.75),toTarget=new T.Vector3(...fitted.target),to=new T.Vector3(...fitted.eye);if(animate&&!prefersReduced())flight={start:performance.now(),from:camera.position.clone(),fromTarget:target.clone(),to,toTarget};else{flight=null;camera.position.copy(to);target.copy(toTarget);camera.lookAt(target);syncSpherical();}$$('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===id)));dirty=true;}
+  function setView(id,animate=true){navigation?.cancel();const narrow=stage.clientWidth<520;const v=id==='sanctuary'&&narrow?{eye:[44,32,13],target:[-36,29,0]}:(views[id]||views.overview);state.view=id;const aspect=stage.clientWidth/stage.clientHeight,fit=Math.max(1,(id==='sanctuary'&&narrow?1.2:id==='overview'?1.4:1)/aspect),fitted=templeFitCameraPreset(v.eye,v.target,fit,cameraFloors[id]??-24.75),toTarget=new T.Vector3(...fitted.target),to=new T.Vector3(...fitted.eye);if(animate&&!prefersReduced())flight={start:performance.now(),from:camera.position.clone(),fromTarget:target.clone(),to,toTarget};else{flight=null;camera.position.copy(to);target.copy(toTarget);camera.lookAt(target);syncSpherical();}$$('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===id)));dirty=true;}
   const localSession=Math.random().toString(36).slice(2);
   function save(){try{window.openai?.setWidgetState({modelContent:{period:'Herodian Second Temple, c. 30 CE',selectedLandmark:landmarks[state.landmark]?.title,cutaway:state.cutaway},privateContent:{...state,_session:localSession,cameraAspect:camera.aspect,camera:camera.position.toArray(),target:target.toArray()}})?.catch(()=>{});}catch(e){}}
   function setCutaway(value){sun.shadow.needsUpdate=true;state.cutaway=Boolean(value);for(const m of cutawayParts)if(m)m.visible=!state.cutaway;$('[data-control="cutaway"]').checked=state.cutaway;dirty=true;}
-  function setSun(value){state.sun=T.MathUtils.clamp(Number(value)||0,0,100);const a=(.12+state.sun/100*.76)*Math.PI;sunDirection.set(Math.cos(a),.22+Math.sin(a)*.9,.42).normalize();sun.intensity=3.0+Math.sin(a)*.65;sun.color.set(state.sun>80?0xffd5a5:state.sun<20?0xffe3ba:0xfff0d7);$('[data-sun-value]').textContent=state.sun<38?'Morning':state.sun<74?'Afternoon':'Evening';$('[data-control="sun"]').value=String(state.sun);dirty=true;}
-  function highlight(id){for(const{mesh,material}of selectedMeshes){mesh.material.dispose();mesh.material=material;}selectedMeshes=[];world.traverse(g=>{if(g.userData.landmark!==id)return;g.traverse(m=>{if(m.isMesh&&!m.isInstancedMesh&&m.material?.isMeshStandardMaterial){const original=m.material;m.material=original.clone();m.material.onBeforeCompile=original.onBeforeCompile;m.material.customProgramCacheKey=original.customProgramCacheKey;m.material.emissive=palette.accent.clone();m.material.emissiveIntensity=.025;selectedMeshes.push({mesh:m,material:original});}});});dirty=true;}
+  function setSun(value){state.sun=T.MathUtils.clamp(Number(value)||0,0,100);const a=(.12+state.sun/100*.76)*Math.PI;sunDirection.set(Math.cos(a),.20+Math.sin(a)*.78,.60).normalize();sun.intensity=3.0+Math.sin(a)*.35;sun.color.set(state.sun>80?0xffd9b4:state.sun<20?0xffe8cd:0xfff4e5);daylightSetting.updateSun(sunDirection,state.sun);$('[data-sun-value]').textContent=state.sun<38?'Morning':state.sun<74?'Afternoon':'Evening';$('[data-control="sun"]').value=String(state.sun);dirty=true;}
+  function highlight(){
+    // Selection stays in the interface. Emission would tint the photographed
+    // stone and fill the very shadows that give the building its depth.
+    dirty=true;
+  }
   function chooseLandmark(id,move=false,persist=true){if(!landmarks[id])return;state.landmark=id;select.value=id;const l=landmarks[id];$('[data-detail-title]').textContent=l.title;$('[data-detail-text]').textContent=l.text;highlight(id);if(move){if(['holies','menorah','bread','incense','veil'].includes(id))setCutaway(true);else if(['vine','sanctuary','mount','antonia','east','south','arch','capitals','passages'].includes(id))setCutaway(false);setView(l.view);}if(persist)save();}
   const stops=['south','stoa','outer','soreg','women','nicanor','israel','altar','sanctuary','vine','menorah','bread','incense','veil','holies','antonia'];
   function renderTourUI(){const active=state.tour>=0;$('[data-action="previous"]').hidden=!active;$('[data-action="previous"]').disabled=state.tour===0;$('[data-action="next"]').hidden=!active;$('[data-action="next"]').textContent=state.tour===stops.length-1?'Finish tour':'Next stop';$('[data-action="tour"]').textContent=active?'Stop tour':'Start guided tour';if(active)$('[data-detail-title]').textContent=(state.tour+1)+' / '+stops.length+' · '+landmarks[stops[state.tour]].title;}
   function tourStop(n){state.tour=T.MathUtils.clamp(n,0,stops.length-1);setCutaway(state.tour>=10&&state.tour<=14);chooseLandmark(stops[state.tour],true,false);renderTourUI();save();}
   function endTour(){state.tour=-1;chooseLandmark(state.landmark,false,false);renderTourUI();save();}
-  $$('[data-view]').forEach(b=>b.addEventListener('click',()=>{if(state.tour>=0)endTour();const id=b.dataset.view;setCutaway(id==='interior');chooseLandmark(({sanctuary:'sanctuary',overview:'mount',east:'east',approach:'sanctuary',court:'priests',interior:'sanctuary',stoa:'stoa',capital:'capitals',gateway:'south'})[id],false,false);setView(id);save();}));
+  $$('[data-view]').forEach(b=>b.addEventListener('click',()=>{if(state.tour>=0)endTour();const id=b.dataset.view;setCutaway(id==='interior');chooseLandmark(({sanctuary:'sanctuary',overview:'mount',east:'east',approach:'sanctuary',court:'priests',interior:'sanctuary',stoa:'stoa',facade:'sanctuary',capital:'capitals',gateway:'south'})[id],false,false);setView(id);save();}));
   select.addEventListener('change',()=>{if(state.tour>=0)endTour();chooseLandmark(select.value,true);});
   $('[data-control="cutaway"]').addEventListener('change',e=>{setCutaway(e.target.checked);save();});
   $('[data-control="labels"]').addEventListener('change',e=>{state.labels=e.target.checked;dirty=true;save();});
@@ -2902,10 +3819,12 @@ function rebuildSouthernApproaches(T, ctx) {
   $('[data-action="tour"]').addEventListener('click',()=>state.tour<0?tourStop(0):endTour());
   $('[data-action="previous"]').addEventListener('click',()=>tourStop(state.tour-1));$('[data-action="next"]').addEventListener('click',()=>state.tour===stops.length-1?endTour():tourStop(state.tour+1));
   $$('[data-camera]').forEach(b=>b.addEventListener('click',()=>{stopFlight();const a=b.dataset.camera;if(a==='left')theta-=.2;if(a==='right')theta+=.2;if(a==='up')phi-=.12;if(a==='down')phi+=.12;if(a==='in')radius*=.8;if(a==='out')radius*=1.25;cameraFromSpherical();save();}));
+  $('[data-action="reset"]').addEventListener('click',()=>{stopFlight();setView(state.view);save();});
   const ray=new T.Raycaster(),mouse=new T.Vector2();
   function pick(e){const rect=renderer.domElement.getBoundingClientRect();mouse.set((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1);ray.setFromCamera(mouse,camera);const hits=ray.intersectObjects(pickables,true);for(const hit of hits){let obj=hit.object,visible=true;for(let p=obj;p;p=p.parent)if(!p.visible)visible=false;if(!visible)continue;let id;while(obj){if(obj.userData.landmark){id=obj.userData.landmark;break;}obj=obj.parent;}if(id){if(state.tour>=0)endTour();chooseLandmark(id,false);break;}}}
-  function setNavigationMode(mode){state.navigation=['trackpad','mouse','touch'].includes(mode)?mode:defaultNavigation;$('[data-control="navigation"]').value=state.navigation;$('[data-navigation-help]').textContent=state.navigation==='mouse'?'Left-drag to orbit · right/middle-drag to pan · wheel to zoom':state.navigation==='touch'?'Drag to orbit · two fingers to pan and pinch to zoom':'Click-drag to orbit · two fingers to pan · pinch to zoom';navigation?.cancel();}
-  navigation=createTempleNavigation(T,{canvas:renderer.domElement,camera,stage,getMode:()=>state.navigation,getPose:()=>({radius,theta,phi,target:target.clone()}),onStart:stopFlight,onCommit:save,onPick:pick,
+  function renderGestureHelp(kind){$('[data-navigation-help]').textContent=kind==='mouse'?'Left-drag to rotate · Right/middle-drag to move · Wheel to zoom':kind==='touch'?'1 finger to rotate · 2 fingers to move · Pinch to zoom':'Click-drag to rotate · 2 fingers to move · Pinch to zoom';}
+  function setNavigationMode(mode){state.navigation=['trackpad','mouse','touch'].includes(mode)?mode:defaultNavigation;$('[data-control="navigation"]').value=state.navigation;renderGestureHelp(state.navigation);navigation?.cancel();}
+  navigation=createTempleNavigation(T,{canvas:renderer.domElement,camera,stage,getMode:()=>state.navigation,getPose:()=>({radius,theta,phi,target:target.clone()}),onStart:stopFlight,onCommit:save,onPick:pick,onInput:renderGestureHelp,
     orbit(dx,dy){theta-=dx*.007;phi-=dy*.006;cameraFromSpherical();},
     applyPose(pose){const rawY=pose.target.y,oldPhi=phi;radius=pose.radius;target.copy(pose.target);target.y=T.MathUtils.clamp(target.y,-24,100);cameraFromSpherical();return target.y!==rawY||phi!==oldPhi;}
   });
@@ -2919,17 +3838,18 @@ function rebuildSouthernApproaches(T, ctx) {
   const projected=new T.Vector3();
   function drawLabels(){const w=stage.clientWidth,h=stage.clientHeight,occupied=[];const sorted=[...labels].sort((a,b)=>Number(b.id===state.landmark)-Number(a.id===state.landmark));for(const l of sorted){const selected=l.id===state.landmark,near=radius<125;l.el.hidden=false;const lw=l.el.offsetWidth,lh=l.el.offsetHeight;projected.copy(l.point).project(camera);const x=(projected.x+1)*w/2,y=(1-projected.y)*h/2;let visible=state.labels&&projected.z<1&&projected.z>-1&&x>lw/2+4&&x<w-lw/2-4&&y>lh+4&&y<h-30&&(!near||selected||['sanctuary','women','altar'].includes(l.id));if(visible){const bound=[x-lw/2-4,y-lh-4,x+lw/2+4,y+4];if(occupied.some(b=>bound[0]<b[2]&&bound[2]>b[0]&&bound[1]<b[3]&&bound[3]>b[1]))visible=false;else occupied.push(bound);}l.el.hidden=!visible;if(visible){l.el.style.left=x+'px';l.el.style.top=y+'px';l.el.setAttribute('aria-pressed',String(selected));}}labelLayer.setAttribute('aria-hidden',String(!state.labels));const north=new T.Vector3(0,0,-1).applyQuaternion(camera.quaternion.clone().invert());const angle=Math.atan2(north.x,-north.y)*180/Math.PI;$('.temple-orientation').textContent='N '+(Math.abs(angle)<30?'↑':angle>30&&angle<150?'→':angle< -30&&angle> -150?'←':'↓')+' · east-facing sanctuary';}
   let visible=true;const intersectionObserver=new IntersectionObserver(entries=>{visible=entries[0].isIntersecting;if(visible)dirty=true;});intersectionObserver.observe(stage);
-  function dispose(){resizeObserver.disconnect();intersectionObserver.disconnect();themeObserver.disconnect();schemeQuery.removeEventListener('change',updateTheme);window.removeEventListener('openai:set_globals',handleGlobalState);navigation?.dispose();const geometries=new Set(),materials=new Set(Object.values(mats)),textures=new Set(textureObjects);for(const s of selectedMeshes)materials.add(s.material);scene.traverse(o=>{if(o.geometry)geometries.add(o.geometry);if(o.material)for(const m of(Array.isArray(o.material)?o.material:[o.material]))materials.add(m);});for(const m of materials){for(const value of Object.values(m))if(value?.isTexture)textures.add(value);m.dispose();}for(const g of geometries)g.dispose();for(const t of textures)t.dispose();contactRenderer.dispose();envTarget.dispose();renderer.dispose();}
-  function frame(now){if(!root.isConnected){dispose();return;}requestAnimationFrame(frame);if(!visible)return;if(flight){const t=Math.min(1,(now-flight.start)/850),k=t*t*(3-2*t);camera.position.lerpVectors(flight.from,flight.to,k);target.lerpVectors(flight.fromTarget,flight.toTarget,k);camera.lookAt(target);dirty=true;if(t===1){flight=null;syncSpherical();save();}}if(dirty){const near=Math.max(.04,Math.min(1.2,camera.position.distanceTo(target)*.002));if(Math.abs(camera.near-near)>.005){camera.near=near;camera.updateProjectionMatrix();}const columnDetail=world.userData.updateTempleColumnDetail?.(camera);if(columnDetail?.changed)sun.shadow.needsUpdate=true;if(columnDetail)root.dataset.columnDetail=JSON.stringify(columnDetail);updateShadow();renderer.info.reset();contactRenderer.render();drawLabels();root.dataset.glError=String(renderer.getContext().getError());root.dataset.contextLost=String(renderer.getContext().isContextLost());root.dataset.camera=JSON.stringify({view:state.view,position:camera.position.toArray(),target:target.toArray(),radius,phi,theta});root.dataset.drawCalls=String(renderer.info.render.calls);root.dataset.triangles=String(renderer.info.render.triangles);dirty=false;}}
-  resize();loading.hidden=true;root.dataset.ready='true';root.dataset.meshes=String(boxCache.size);requestAnimationFrame(frame);
+  function dispose(){resizeObserver.disconnect();intersectionObserver.disconnect();themeObserver.disconnect();schemeQuery.removeEventListener('change',updateTheme);window.removeEventListener('openai:set_globals',handleGlobalState);navigation?.dispose();const geometries=new Set(),materials=new Set(Object.values(mats)),textures=new Set(textureObjects);scene.traverse(o=>{if(o.geometry)geometries.add(o.geometry);if(o.material)for(const m of(Array.isArray(o.material)?o.material:[o.material]))materials.add(m);});for(const m of materials){for(const value of Object.values(m))if(value?.isTexture)textures.add(value);m.dispose();}for(const g of geometries)g.dispose();for(const t of textures)t.dispose();materialRealism.dispose();contactRenderer.dispose();envTarget.dispose();renderer.dispose();}
+  function frame(now){if(!root.isConnected){dispose();return;}requestAnimationFrame(frame);if(!visible)return;if(flight){const t=Math.min(1,(now-flight.start)/850),k=t*t*(3-2*t);camera.position.lerpVectors(flight.from,flight.to,k);target.lerpVectors(flight.fromTarget,flight.toTarget,k);camera.lookAt(target);dirty=true;if(t===1){flight=null;syncSpherical();save();}}if(dirty){const near=Math.max(.04,Math.min(1.2,camera.position.distanceTo(target)*.002));if(Math.abs(camera.near-near)>.005){camera.near=near;camera.updateProjectionMatrix();}const columnDetail=world.userData.updateTempleColumnDetail?.(camera);if(columnDetail?.changed)sun.shadow.needsUpdate=true;if(columnDetail)root.dataset.columnDetail=JSON.stringify(columnDetail);updateShadow();renderer.info.reset();contactRenderer.render();drawLabels();loading.hidden=true;root.dataset.ready='true';root.dataset.glError=String(renderer.getContext().getError());root.dataset.contextLost=String(renderer.getContext().isContextLost());root.dataset.camera=JSON.stringify({view:state.view,position:camera.position.toArray(),target:target.toArray(),radius,phi,theta});root.dataset.drawCalls=String(renderer.info.render.calls);root.dataset.triangles=String(renderer.info.render.triangles);dirty=false;}}
+  resize();loading.textContent='Preparing stone, gold and daylight…';root.dataset.ready='preparing';root.dataset.meshes=String(boxCache.size);
+  Promise.all([materialRealism.ready,environmentReady]).then(()=>{world.userData.updateTempleColumnDetail?.(camera);updateShadow();return contactRenderer.prepare();}).catch(()=>{root.dataset.shaderPreparation='fallback';}).then(()=>{if(!root.isConnected){dispose();return;}dirty=true;requestAnimationFrame(frame);});
 })();
 </script>
 
 </main>
 <footer>
 <details><summary>About this reconstruction &amp; sources</summary>
-<p>The Herodian Second Temple, around 30 CE. Layout and principal spaces follow ancient descriptions; detailed decoration, landscape, colors, paving placement and people are interpretive. Dimensions use an illustrative 0.5 m cubit. The Holy of Holies is empty. Antonia’s courtyard, carved profiles, southern stair details and passage continuation are interpretive; the southern vestibules extend 45 metres into a schematic passage network.</p>
-<p>Architectural references: <a href="https://penelope.uchicago.edu/josephus/war-5.html" target="_blank" rel="noopener">Josephus, Jewish War 5</a> · <a href="https://penelope.uchicago.edu/josephus/ant-15.html" target="_blank" rel="noopener">Antiquities 15</a> · <a href="https://www.sefaria.org/Mishnah_Middot" target="_blank" rel="noopener">Mishnah Middot</a> · <a href="https://image-database.nes.lsa.umich.edu/items/show/179" target="_blank" rel="noopener">Israel Museum model photograph</a> · <a href="https://tmsifting.org/en/2016/09/06/1374/" target="_blank" rel="noopener">Excavated geometric stone flooring</a>. Carved forms: <a href="https://museum.imj.org.il/journal/archive/2017/pdf/IMSA-8_Herodian%20-Ionic-Capital.pdf" target="_blank" rel="noopener">Herodian smooth-leaf capital study</a> · <a href="https://publications.iaa.org.il/atiqot/vol85/iss1/9/" target="_blank" rel="noopener">Triple Gate excavations</a> · <a href="https://www.penn.museum/sites/expedition/recent-excavations-in-jerusalem/" target="_blank" rel="noopener">Southern approaches excavation report</a>. Captured daylight: <a href="https://polyhaven.com/a/dry_meadow" target="_blank" rel="noopener">Poly Haven, Dry Meadow</a> (CC0). <a href="https://github.com/never-nude/temple" target="_blank" rel="noopener">Project on GitHub</a>.</p>
+<p>The Herodian Second Temple, around 30 CE. Layout and principal spaces follow ancient descriptions. The sanctuary’s four-pilaster façade, deep gilded porch, dressed stone, botanical carving, gold-sheet work and worn steps form a crafted architectural interpretation; detailed profiles and finishes include imagined elements. Landscape, colors, paving placement and people are also interpretive. Dimensions use an illustrative 0.5 m cubit. The Holy of Holies is empty. Antonia’s courtyard, southern stair details and passage continuation are interpretive; the southern vestibules extend 45 metres into a schematic passage network.</p>
+<p>Architectural references: <a href="https://penelope.uchicago.edu/josephus/war-5.html" target="_blank" rel="noopener">Josephus, Jewish War 5</a> · <a href="https://penelope.uchicago.edu/josephus/ant-15.html" target="_blank" rel="noopener">Antiquities 15</a> · <a href="https://www.sefaria.org/Mishnah_Middot" target="_blank" rel="noopener">Mishnah Middot</a> · <a href="https://image-database.nes.lsa.umich.edu/items/show/179" target="_blank" rel="noopener">Israel Museum model photograph</a> · <a href="https://tmsifting.org/en/2016/09/06/1374/" target="_blank" rel="noopener">Excavated geometric stone flooring</a>. Carved forms: <a href="https://museum.imj.org.il/journal/archive/2017/pdf/IMSA-8_Herodian%20-Ionic-Capital.pdf" target="_blank" rel="noopener">Herodian smooth-leaf capital study</a> · <a href="https://publications.iaa.org.il/atiqot/vol85/iss1/9/" target="_blank" rel="noopener">Triple Gate excavations</a> · <a href="https://www.penn.museum/sites/expedition/recent-excavations-in-jerusalem/" target="_blank" rel="noopener">Southern approaches excavation report</a>. Local material references: <a href="https://polyhaven.com/a/marble_01" target="_blank" rel="noopener">Marble 01 by Rob Tuytel</a> · <a href="https://polyhaven.com/a/dry_meadow" target="_blank" rel="noopener">Dry Meadow daylight</a>, from Poly Haven (CC0). These modern references do not reproduce an excavated Temple surface. <a href="https://github.com/never-nude/temple" target="_blank" rel="noopener">Project on GitHub</a>.</p>
 </details>
 </footer>
 <script>
