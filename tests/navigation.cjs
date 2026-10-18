@@ -72,10 +72,41 @@ for(const order of [[1,2],[2,1]]){
  h.event('gesturestart',{scale:1});h.event('gesturechange',{scale:2});close(h.pose.radius,50);h.nav.dispose();
 }
 // Native pinch reversal responds immediately after either radius limit.
-for(const [scale,reverse,limit]of [[100,99,1.5],[.01,.011,1800]]){
+for(const [scale,reverse,limit]of [[4000,3900,.05],[.01,.011,1800]]){
  const h=harness();h.event('gesturestart',{clientX:400,clientY:250,scale:1});h.event('gesturechange',{scale});close(h.pose.radius,limit);
  h.event('gesturechange',{scale:reverse});close(h.pose.radius,limit*scale/reverse);
- assert.ok(limit===1.5?h.pose.radius>limit:h.pose.radius<limit);h.nav.dispose();
+ assert.ok(limit===.05?h.pose.radius>limit:h.pose.radius<limit);h.nav.dispose();
+}
+// Wheel and trackpad pinch can pass the old 1.5m barrier, stop at 5cm,
+// and reverse immediately. All inputs share the button/orbit constraint.
+for(const mode of['mouse','trackpad']){
+ const h=harness(mode),ctrlKey=mode==='trackpad';
+ for(let i=0;i<100;i++)h.event('wheel',{deltaY:-200,deltaMode:0,ctrlKey,clientX:400,clientY:250});
+ close(h.pose.radius,.05);h.event('wheel',{deltaY:20,deltaMode:0,ctrlKey,clientX:400,clientY:250});assert.ok(h.pose.radius>.05&&h.pose.radius<1.5);h.nav.dispose();
+}
+// Repeated physical-size finger pinches can reach and reverse from 5cm.
+{
+ const h=harness('touch');
+ for(let i=0;i<12;i++){
+  h.pointer('pointerdown',1,300,250);h.pointer('pointerdown',2,500,250);
+  h.pointer('pointermove',1,200,250);h.pointer('pointermove',2,600,250);
+  h.pointer('pointerup',1,200,250);h.pointer('pointerup',2,600,250);h.tick(200);
+ }
+ close(h.pose.radius,.05);h.pointer('pointerdown',1,200,250);h.pointer('pointerdown',2,600,250);
+ h.pointer('pointermove',1,300,250);h.pointer('pointermove',2,500,250);close(h.pose.radius,.1);h.nav.dispose();
+}
+// A 5cm view keeps the inspection target comfortably beyond the near plane.
+{
+ const h=harness(),near=h.context.templeCameraNearPlane;
+ for(const radius of[.05,.1,.5,1.5,10,100,1800]){const clip=near(radius);assert.ok(clip>0&&clip<radius);assert.ok(clip<=radius*.04+1e-12);}
+ close(near(.05),.002);close(near(1.5),.003);close(near(1800),1.2);
+ // The actual frame must update clipping even for sub-5mm differences.
+ const fragment=fs.readFileSync(require.resolve('../source/second-temple.fragment.html'),'utf8');
+ const clipUpdate=fragment.match(/const near=templeCameraNearPlane[^}]+}/)[0];
+ let updates=0;const camera={near:.006,position:{distanceTo:()=>.05},updateProjectionMatrix(){updates++;}};
+ vm.runInNewContext(clipUpdate,{camera,target:{},templeCameraNearPlane:near});close(camera.near,.002);assert.equal(updates,1);
+ vm.runInNewContext(clipUpdate,{camera,target:{},templeCameraNearPlane:near});assert.equal(updates,1);
+ h.nav.dispose();
 }
 // Ordinary wheel pans on a trackpad and zooms in Mouse mode; units normalize.
 {
@@ -104,8 +135,8 @@ for(const [button,buttons]of [[1,4],[2,2]]){
  const h=harness(),constrain=h.context.templeConstrainCameraSphere;
  const p=constrain({radius:1.5,phi:1.5,targetY:-5},1.18);assert.ok(p.targetY+p.radius*Math.cos(p.phi)>=1.18-1e-9);assert.ok(p.phi>=.025);
  const valid=constrain({radius:100,phi:1,targetY:12},1.18);close(valid.radius,100);close(valid.phi,1);close(valid.targetY,12);
- for(const lowest of[-24.75,-14.32,1.18,8.68])for(const radius of[.1,1.5,20,1800,2000])for(const targetY of[-24,0,100])for(const phi of[-1,.025,1.5,Math.PI]){
-  const r=constrain({radius,phi,targetY},lowest);assert.ok(Number.isFinite(r.radius)&&Number.isFinite(r.phi)&&Number.isFinite(r.targetY));assert.ok(r.radius>=1.5&&r.radius<=1800);assert.ok(r.phi>=.025&&r.phi<=Math.PI-.035);assert.ok(r.targetY+r.radius*Math.cos(r.phi)>=lowest-1e-9);
+ for(const lowest of[-24.75,-14.32,1.18,8.68])for(const radius of[0,.001,.05,.1,1.5,20,1800,2000])for(const targetY of[-24,0,100])for(const phi of[-1,.025,1.5,Math.PI]){
+  const r=constrain({radius,phi,targetY},lowest);assert.ok(Number.isFinite(r.radius)&&Number.isFinite(r.phi)&&Number.isFinite(r.targetY));assert.ok(r.radius>=.05&&r.radius<=1800);assert.ok(r.phi>=.025&&r.phi<=Math.PI-.035);assert.ok(r.targetY+r.radius*Math.cos(r.phi)>=lowest-1e-9);
  }
  h.nav.dispose();
 }
@@ -127,6 +158,6 @@ for(const [button,buttons]of [[1,4],[2,2]]){
  const sync=fragment.match(/  function syncSpherical\(\)\{[^\n]+\}/)[0],project=fragment.match(/  function cameraFromSpherical\(\)\{[^\n]+\}/)[0];
  const camera={position:new V3(0,-5,0),lookAt(){}},target=new V3(0,-5,0);
  const restored=vm.runInNewContext('let radius,theta,phi,dirty=false;'+floors+sync+project+'syncSpherical();cameraFromSpherical();({radius,theta,phi,dirty})',{camera,target,state:{view:'stoa'},templeConstrainCameraSphere:h.context.templeConstrainCameraSphere,T:{MathUtils:{clamp:(v,a,b)=>Math.max(a,Math.min(b,v))}}});
- assert.ok(Number.isFinite(restored.phi)&&Number.isFinite(restored.theta));close(restored.radius,1.5);assert.ok(camera.position.y>=1.18-1e-9);assert.equal(restored.dirty,true);h.nav.dispose();
+ assert.ok(Number.isFinite(restored.phi)&&Number.isFinite(restored.theta));close(restored.radius,.05);assert.ok(camera.position.y>=1.18-1e-9);assert.equal(restored.dirty,true);h.nav.dispose();
 }
 console.log('Navigation invariants and event-sequence checks passed.');

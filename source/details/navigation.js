@@ -1,5 +1,8 @@
 /* Navigation keeps physical input streams separate: a pinch is applied once,
    and two touch points use a fixed baseline for simultaneous pan and zoom. */
+const TEMPLE_CAMERA_LIMITS=Object.freeze({min:.05,max:1800,minPhi:.025,maxPhi:Math.PI-.035});
+// Millimetre near clipping keeps carvings visible at the closest inspection scale.
+function templeCameraNearPlane(radius){return Math.max(.002,Math.min(1.2,radius*.002));}
 function templeWheelPixels(event, height, width=height) {
   const unitX=event.deltaMode===1?16:event.deltaMode===2?Math.max(1,width):1;
   const unitY=event.deltaMode===1?16:event.deltaMode===2?Math.max(1,height):1;
@@ -7,7 +10,7 @@ function templeWheelPixels(event, height, width=height) {
 }
 // Make the floor constraint feasible even after panning the orbit target below
 // the floor and then zooming in. The polar interval must never be inverted.
-function templeConstrainCameraSphere(pose, lowest, limits={min:1.5,max:1800,minPhi:.025,maxPhi:Math.PI-.035}) {
+function templeConstrainCameraSphere(pose, lowest, limits=TEMPLE_CAMERA_LIMITS) {
   const radius=Math.max(limits.min,Math.min(limits.max,pose.radius));
   const targetY=Math.max(pose.targetY,lowest-radius*Math.cos(limits.minPhi));
   const ratio=Math.max(-1,Math.min(1,(lowest-targetY)/radius));
@@ -26,7 +29,7 @@ function templeFitCameraPreset(eye, target, fit=1, lowest=-24.75) {
   const center=[target[0],sphere.targetY,target[2]],r=sphere.radius,p=sphere.phi;
   return {eye:[center[0]+r*Math.sin(p)*Math.sin(theta),center[1]+r*Math.cos(p),center[2]+r*Math.sin(p)*Math.cos(theta)],target:center};
 }
-function templeGestureProjection(start, current, limits={min:1.5,max:1800}) {
+function templeGestureProjection(start, current, limits=TEMPLE_CAMERA_LIMITS) {
   const distance=Math.max(.001,Number.isFinite(current.distance)?current.distance:.001);
   const wanted=start.radius*Math.max(.001,start.distance)/distance;
   const radius=Math.max(limits.min,Math.min(limits.max,wanted));

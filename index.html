@@ -2246,6 +2246,9 @@ function refineTempleMaterials(T, ctx) {
 
 /* Navigation keeps physical input streams separate: a pinch is applied once,
    and two touch points use a fixed baseline for simultaneous pan and zoom. */
+const TEMPLE_CAMERA_LIMITS=Object.freeze({min:.05,max:1800,minPhi:.025,maxPhi:Math.PI-.035});
+// Millimetre near clipping keeps carvings visible at the closest inspection scale.
+function templeCameraNearPlane(radius){return Math.max(.002,Math.min(1.2,radius*.002));}
 function templeWheelPixels(event, height, width=height) {
   const unitX=event.deltaMode===1?16:event.deltaMode===2?Math.max(1,width):1;
   const unitY=event.deltaMode===1?16:event.deltaMode===2?Math.max(1,height):1;
@@ -2253,7 +2256,7 @@ function templeWheelPixels(event, height, width=height) {
 }
 // Make the floor constraint feasible even after panning the orbit target below
 // the floor and then zooming in. The polar interval must never be inverted.
-function templeConstrainCameraSphere(pose, lowest, limits={min:1.5,max:1800,minPhi:.025,maxPhi:Math.PI-.035}) {
+function templeConstrainCameraSphere(pose, lowest, limits=TEMPLE_CAMERA_LIMITS) {
   const radius=Math.max(limits.min,Math.min(limits.max,pose.radius));
   const targetY=Math.max(pose.targetY,lowest-radius*Math.cos(limits.minPhi));
   const ratio=Math.max(-1,Math.min(1,(lowest-targetY)/radius));
@@ -2272,7 +2275,7 @@ function templeFitCameraPreset(eye, target, fit=1, lowest=-24.75) {
   const center=[target[0],sphere.targetY,target[2]],r=sphere.radius,p=sphere.phi;
   return {eye:[center[0]+r*Math.sin(p)*Math.sin(theta),center[1]+r*Math.cos(p),center[2]+r*Math.sin(p)*Math.cos(theta)],target:center};
 }
-function templeGestureProjection(start, current, limits={min:1.5,max:1800}) {
+function templeGestureProjection(start, current, limits=TEMPLE_CAMERA_LIMITS) {
   const distance=Math.max(.001,Number.isFinite(current.distance)?current.distance:.001);
   const wanted=start.radius*Math.max(.001,start.distance)/distance;
   const radius=Math.max(limits.min,Math.min(limits.max,wanted));
@@ -3839,7 +3842,7 @@ function rebuildSouthernApproaches(T, ctx) {
   function drawLabels(){const w=stage.clientWidth,h=stage.clientHeight,occupied=[];const sorted=[...labels].sort((a,b)=>Number(b.id===state.landmark)-Number(a.id===state.landmark));for(const l of sorted){const selected=l.id===state.landmark,near=radius<125;l.el.hidden=false;const lw=l.el.offsetWidth,lh=l.el.offsetHeight;projected.copy(l.point).project(camera);const x=(projected.x+1)*w/2,y=(1-projected.y)*h/2;let visible=state.labels&&projected.z<1&&projected.z>-1&&x>lw/2+4&&x<w-lw/2-4&&y>lh+4&&y<h-30&&(!near||selected||['sanctuary','women','altar'].includes(l.id));if(visible){const bound=[x-lw/2-4,y-lh-4,x+lw/2+4,y+4];if(occupied.some(b=>bound[0]<b[2]&&bound[2]>b[0]&&bound[1]<b[3]&&bound[3]>b[1]))visible=false;else occupied.push(bound);}l.el.hidden=!visible;if(visible){l.el.style.left=x+'px';l.el.style.top=y+'px';l.el.setAttribute('aria-pressed',String(selected));}}labelLayer.setAttribute('aria-hidden',String(!state.labels));const north=new T.Vector3(0,0,-1).applyQuaternion(camera.quaternion.clone().invert());const angle=Math.atan2(north.x,-north.y)*180/Math.PI;$('.temple-orientation').textContent='N '+(Math.abs(angle)<30?'↑':angle>30&&angle<150?'→':angle< -30&&angle> -150?'←':'↓')+' · east-facing sanctuary';}
   let visible=true;const intersectionObserver=new IntersectionObserver(entries=>{visible=entries[0].isIntersecting;if(visible)dirty=true;});intersectionObserver.observe(stage);
   function dispose(){resizeObserver.disconnect();intersectionObserver.disconnect();themeObserver.disconnect();schemeQuery.removeEventListener('change',updateTheme);window.removeEventListener('openai:set_globals',handleGlobalState);navigation?.dispose();const geometries=new Set(),materials=new Set(Object.values(mats)),textures=new Set(textureObjects);scene.traverse(o=>{if(o.geometry)geometries.add(o.geometry);if(o.material)for(const m of(Array.isArray(o.material)?o.material:[o.material]))materials.add(m);});for(const m of materials){for(const value of Object.values(m))if(value?.isTexture)textures.add(value);m.dispose();}for(const g of geometries)g.dispose();for(const t of textures)t.dispose();materialRealism.dispose();contactRenderer.dispose();envTarget.dispose();renderer.dispose();}
-  function frame(now){if(!root.isConnected){dispose();return;}requestAnimationFrame(frame);if(!visible)return;if(flight){const t=Math.min(1,(now-flight.start)/850),k=t*t*(3-2*t);camera.position.lerpVectors(flight.from,flight.to,k);target.lerpVectors(flight.fromTarget,flight.toTarget,k);camera.lookAt(target);dirty=true;if(t===1){flight=null;syncSpherical();save();}}if(dirty){const near=Math.max(.04,Math.min(1.2,camera.position.distanceTo(target)*.002));if(Math.abs(camera.near-near)>.005){camera.near=near;camera.updateProjectionMatrix();}const columnDetail=world.userData.updateTempleColumnDetail?.(camera);if(columnDetail?.changed)sun.shadow.needsUpdate=true;if(columnDetail)root.dataset.columnDetail=JSON.stringify(columnDetail);updateShadow();renderer.info.reset();contactRenderer.render();drawLabels();loading.hidden=true;root.dataset.ready='true';root.dataset.glError=String(renderer.getContext().getError());root.dataset.contextLost=String(renderer.getContext().isContextLost());root.dataset.camera=JSON.stringify({view:state.view,position:camera.position.toArray(),target:target.toArray(),radius,phi,theta});root.dataset.drawCalls=String(renderer.info.render.calls);root.dataset.triangles=String(renderer.info.render.triangles);dirty=false;}}
+  function frame(now){if(!root.isConnected){dispose();return;}requestAnimationFrame(frame);if(!visible)return;if(flight){const t=Math.min(1,(now-flight.start)/850),k=t*t*(3-2*t);camera.position.lerpVectors(flight.from,flight.to,k);target.lerpVectors(flight.fromTarget,flight.toTarget,k);camera.lookAt(target);dirty=true;if(t===1){flight=null;syncSpherical();save();}}if(dirty){const near=templeCameraNearPlane(camera.position.distanceTo(target));if(camera.near!==near){camera.near=near;camera.updateProjectionMatrix();}const columnDetail=world.userData.updateTempleColumnDetail?.(camera);if(columnDetail?.changed)sun.shadow.needsUpdate=true;if(columnDetail)root.dataset.columnDetail=JSON.stringify(columnDetail);updateShadow();renderer.info.reset();contactRenderer.render();drawLabels();loading.hidden=true;root.dataset.ready='true';root.dataset.glError=String(renderer.getContext().getError());root.dataset.contextLost=String(renderer.getContext().isContextLost());root.dataset.camera=JSON.stringify({view:state.view,position:camera.position.toArray(),target:target.toArray(),radius,phi,theta,near:camera.near});root.dataset.drawCalls=String(renderer.info.render.calls);root.dataset.triangles=String(renderer.info.render.triangles);dirty=false;}}
   resize();loading.textContent='Preparing stone, gold and daylight…';root.dataset.ready='preparing';root.dataset.meshes=String(boxCache.size);
   Promise.all([materialRealism.ready,environmentReady]).then(()=>{world.userData.updateTempleColumnDetail?.(camera);updateShadow();return contactRenderer.prepare();}).catch(()=>{root.dataset.shaderPreparation='fallback';}).then(()=>{if(!root.isConnected){dispose();return;}dirty=true;requestAnimationFrame(frame);});
 })();
