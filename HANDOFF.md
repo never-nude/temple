@@ -6,7 +6,7 @@ Updated 2026-10-17. This repository contains the complete current website and mo
 
 - Repository: https://github.com/never-nude/temple
 - Live model: https://never-nude.github.io/temple/
-- Start from `main` for the published model. This release extends the construction pass with a crafted sanctuary, photographed materials and smoother navigation.
+- Start from `main` for the published model. This release retains the crafted sanctuary and photographed materials, and uses the same OrbitControls implementation as Atrium for navigation.
 - Read this file and `README.md` before continuing. This is a separate Temple project; do not work in the unrelated Sniffari repository.
 
 Run from the repository folder:
@@ -16,7 +16,7 @@ python3 build.py
 python3 -m http.server 5204
 ```
 
-Open http://localhost:5204/. Three.js loads from a pinned CDN; the HDR lighting asset, stone texture maps and loader are included locally. There is no package installation, backend or API key requirement.
+Open http://localhost:5204/. The renderer, controls, HDR loader, lighting and stone texture maps are included locally; there are no external runtime requests. There is no package installation, backend or API key requirement.
 
 ## User intent and order
 
@@ -32,11 +32,13 @@ First run and inspect the current model, then continue the user's latest instruc
 - `source/details/sanctuary-realism.js` and `sanctuary-carving.js`: dressed construction, four-pilaster façade, deep gilded porch, joinery, formed gold sheets, botanical ornament, stone profiles and worn steps.
 - `source/details/material-realism.js`: local photographed stone maps, restrained mineral/rain variation and shallow hand-worked gold reflections.
 - `source/details/daylight-setting.js` and `rendering.js`: daylight context, HDR display resolve, supported desktop multisampling and nearby contact shading.
-- Other `source/details/` modules: colonnades, Antonia, southern approaches and the navigation controller. The build inlines all detail modules.
-- `tests/navigation.cjs`: dependency-free checks for the actual gesture controller.
+- Other `source/details/` modules: colonnades, Antonia, southern approaches and navigation integration around the vendored OrbitControls. The build inlines all detail modules.
+- `tests/navigation.cjs`: dependency-free checks using the actual vendored controller and renderer math.
 - `source/page.html`: website shell, theme controls, local preference storage and source links.
 - `build.py`: standard-library build that combines those files into `index.html`. Rebuild after edits; do not edit generated `index.html` alone.
-- `assets/` and `vendor/`: captured CC0 lighting, the local 2K Marble 01 diffuse/height/roughness maps, RGBE loader and attribution/licenses.
+- `assets/` and `vendor/`: captured CC0 lighting, local 2K Marble 01 diffuse/height/roughness maps, Three.js r160.1 renderer, RGBE loader, r182 OrbitControls and attribution/licenses.
+
+`vendor/README.md` documents the controls copied from Atrium's Three.js r182 dependency and their wrapper for the existing r160.1 renderer. The renderer remains the same Three.js version previously served by CDN. Preserve the provenance notes, upstream links, controls license header and `vendor/THREE-LICENSE.txt`.
 
 The live site publishes the root of `main` through GitHub Pages. Work on a `codex/` branch, commit, push and open a PR. The user has authorized publishing this project to `never-nude/temple`. Leave repository settings, Pages settings, Git configuration and secrets to the owner.
 
@@ -50,7 +52,9 @@ The sanctuary now has four fluted pilasters, finely jointed dressed stone, deepl
 
 Release validation includes build/syntax checks, all 16 tour stops and cutaway transitions, viewpoints, lighting and theme controls, and browser layouts at 320/390 px. Check finite geometry, successful local texture/HDR loading and WebGL errors after any geometry, shader or renderer change. Inspect both wide and close views: contact shading should fade out between 30 and 55 metres so tiny course edges do not stipple distant walls. Desktop multisampling is conditional on renderer support; phones use reduced pixel density and shadow resolution. Browser phone previews do not establish actual iPhone GPU performance or native gesture feel.
 
-Trackpad controls: click-drag orbit, two-finger pan, pinch zoom. Mouse controls: left-drag orbit, right/middle-drag pan, wheel zoom. Touchscreen: one-finger orbit, simultaneous two-finger pan/pinch. Touch movement has a small tap threshold; switching between one and two fingers rebases the gesture to prevent jumps. Gesture hints follow the input stream, navigation mode is saved locally, and Reset view restores the selected preset. The shared minimum orbit radius is 0.05 metres; adaptive near clipping reaches 0.002 metres for inspection. Run `node tests/navigation.cjs` after changing controls. Native Safari and physical trackpad/iPhone checks remain separate from synthetic event regression tests.
+Navigation now uses the actual Atrium OrbitControls implementation (Three.js r182), with damping factor 0.08, rotation speed 0.9 and zoom speed 1.35. Trackpad scroll and mouse-wheel events zoom toward the orbit target without cursor drift; trackpad click-drag and mouse left-drag orbit. Right-drag or Shift/Ctrl/Meta-left-drag pans; middle-drag zooms. Touchscreen controls are one-finger orbit and simultaneous two-finger pan/pinch. There is no device selector or custom saved device mode.
+
+Double-click or double-tap the canvas, use Reset view, or press 0 to restore the current preset. The +/− keys and camera buttons use distance factors 0.68/1.46. Preserve preset transitions, tour integration and camera persistence when changing the controls. The shared minimum orbit radius is 0.05 metres; adaptive near clipping reaches 0.002 metres for inspection. Run `node tests/navigation.cjs` after changing controls. Native Safari and physical trackpad/iPhone checks remain separate from synthetic event regression tests.
 
 Material credits: [Marble 01 by Rob Tuytel](https://polyhaven.com/a/marble_01) and [Dry Meadow](https://polyhaven.com/a/dry_meadow), from Poly Haven under CC0. Keep their local files and `assets/README.md` attribution when transferring or publishing the repository.
 
